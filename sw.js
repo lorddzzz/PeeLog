@@ -1,6 +1,6 @@
 // PeeLog service worker. Must sit at the repo root so its scope covers the
 // whole app. Bump CACHE on every deploy that changes a precached file.
-const CACHE = 'peelog-shell-v3';
+const CACHE = 'peelog-shell-v4';
 
 const SHELL = [
   './',
@@ -10,6 +10,8 @@ const SHELL = [
   'js/selftest.js',
   'js/store.js',
   'js/model.js',
+  'js/ui.js',
+  'js/tonight.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

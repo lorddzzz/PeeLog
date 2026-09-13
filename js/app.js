@@ -1,7 +1,13 @@
-// PeeLog M0 — app shell. No persistence yet; see docs/DESIGN.md for the plan.
-import { runChecks, renderChecks, runSelfTests } from './selftest.js';
+// PeeLog M1 — boot, hash router, tab bar. Screens own their own DOM; this
+// file only decides which one is mounted and holds the single store.
 
-export const VERSION = '0.1.0-m0';
+import { runChecks, renderChecks, runSelfTests } from './selftest.js';
+import { createStore } from './store.js';
+import { nightLabelFor } from './model.js';
+import { h, linkRow, paint, title } from './ui.js';
+import { render as renderTonight, renderEvent } from './tonight.js';
+
+export const VERSION = '0.2.0-m1';
 
 /* ── Service worker ─────────────────────────────────────────────────────
    Registered with a relative path so the scope follows the deploy
@@ -18,77 +24,162 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-/* ── Tabs ───────────────────────────────────────────────────────────── */
-const views = document.querySelectorAll('.view');
-const tabs = document.querySelectorAll('.tabs button');
+/* ── Store ──────────────────────────────────────────────────────────────── */
+const store = createStore();
 
-function show(name) {
-  views.forEach(v => { v.hidden = v.dataset.view !== name; });
-  tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === name));
-  if (name === 'check') refreshChecks();
-}
-tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
-
-/* ── Tonight (mock) ─────────────────────────────────────────────────────
-   M0 proves tap targets and legibility in a real dark room. Events are held
-   in memory only and deliberately discarded on reload — the banner says so,
-   so a logged night is never silently lost to a missing store. */
-const LABEL = {
-  selfToilet: 'asked to pee',
-  lift: 'lifted to potty',
-  drink: 'water',
-  wake: 'woke up',
-  wet: 'WET BED',
-};
-
-const mock = [];
-const lastText = document.getElementById('last-text');
-const undoBtn = document.getElementById('undo');
-
-const hhmm = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-function renderLast() {
-  const e = mock[mock.length - 1];
-  lastText.textContent = e
-    ? `${hhmm(e.t)}  ${LABEL[e.type]}`
-    : 'Nothing logged yet';
-  undoBtn.hidden = !e;
-  document.getElementById('summary').textContent = mock.length
-    ? `${mock.length} event${mock.length > 1 ? 's' : ''} this session (not saved)`
-    : 'No night open';
+// A document we could not read is the one thing the parent must know about
+// before logging on top of it; the copy is already parked under :corrupt.
+const banner = document.getElementById('banner');
+if (store.loadIssue) {
+  banner.textContent = store.loadIssue === 'newer'
+    ? 'This phone has a log from a newer version of PeeLog. It was kept, not opened.'
+    : 'The saved log could not be read. A copy was kept; tonight starts a new one.';
+  banner.hidden = false;
 }
 
-document.querySelectorAll('.ev').forEach(btn => {
-  btn.addEventListener('click', () => {
-    mock.push({ type: btn.dataset.ev, t: new Date() });
-    // Visual confirmation: iOS Safari exposes no Vibration API, so a buzz
-    // would silently do nothing on the target device.
-    btn.classList.add('hit');
-    setTimeout(() => btn.classList.remove('hit'), 120);
-    renderLast();
-  });
-});
+// Storage the OS may evict is the standing risk (DESIGN.md §9). Ask once, on a
+// device that has nothing recorded yet — Safari decides silently, so there is
+// nothing to gate behind a tap, and an already-granted grant is never re-asked.
+async function askToPersist() {
+  const doc = store.get();
+  if (doc.nights.length || doc.activeNightId) return;
+  if (!navigator.storage?.persist) return;
+  try {
+    if (await navigator.storage.persisted?.()) return;
+    await navigator.storage.persist();
+  } catch { /* not supported here; the Check tab reports the real state */ }
+}
+askToPersist();
 
-undoBtn.addEventListener('click', () => { mock.pop(); renderLast(); });
+const applyArt = doc => document.body.classList.toggle('no-art', doc.settings?.art === false);
+applyArt(store.get());
+store.subscribe(applyArt);
 
-/* ── Install check ──────────────────────────────────────────────────── */
+/* ── Screens still to come ──────────────────────────────────────────────── */
+
+function renderHistory(el) {
+  paint(el, [
+    title({ overline: 'History', name: 'Nights', lead: 'History arrives in M3.' }),
+    linkRow({ label: 'Back to Tonight', href: '#/tonight' }),
+  ]);
+}
+
+function renderMorning(el, ctx) {
+  paint(el, [
+    title({ overline: 'Morning review', name: 'Not yet', lead: 'Morning review arrives next.' }),
+    h('p', { class: 'small', text: nightLabelFor(ctx.params.nightId) }),
+    linkRow({ label: 'Back to Tonight', href: '#/tonight' }),
+  ]);
+}
+
+/* ── Install check ──────────────────────────────────────────────────────
+   Its markup stays in index.html and is moved in and out of the router's
+   container, so its buttons keep their listeners across navigation. */
+const checkSection = document.getElementById('view-check');
+checkSection.remove();
+checkSection.hidden = false;
+
 async function refreshChecks() {
-  renderChecks(document.getElementById('checks'), [...await runChecks(VERSION), ...runSelfTests()]);
+  // Detached from the document between visits, so the rows are looked up
+  // inside the section rather than by id.
+  renderChecks(checkSection.querySelector('#checks'), [...await runChecks(VERSION), ...runSelfTests()]);
 }
 
-document.getElementById('recheck').addEventListener('click', refreshChecks);
+function renderCheck(el) {
+  el.replaceChildren(checkSection);
+  refreshChecks();
+}
 
-document.getElementById('persist').addEventListener('click', async () => {
+checkSection.querySelector('#recheck').addEventListener('click', refreshChecks);
+
+checkSection.querySelector('#persist').addEventListener('click', async () => {
   if (navigator.storage?.persist) await navigator.storage.persist();
   refreshChecks();
 });
 
-document.getElementById('update').addEventListener('click', async () => {
+checkSection.querySelector('#update').addEventListener('click', async () => {
   await swReg?.update();
   location.reload();
 });
 
-/* ── Boot ───────────────────────────────────────────────────────────── */
+/* ── Router ─────────────────────────────────────────────────────────────
+   Hash routes, so the phone's back gesture works and a committed field
+   survives it (handoff rule 7). Adding a screen is one import and one row. */
+
+const routes = [
+  ['#/tonight', renderTonight],
+  ['#/event/:id', renderEvent],
+  ['#/morning/:nightId', renderMorning],
+  ['#/history', renderHistory],
+  ['#/check', renderCheck],
+];
+
+// Which tab owns a route. Detail screens stay under the tab they came from.
+const TAB_OF = {
+  tonight: 'tonight', event: 'tonight', morning: 'tonight', evening: 'tonight',
+  history: 'history', night: 'history', patterns: 'history',
+  check: 'check',
+};
+
+const screen = document.getElementById('screen');
+const main = document.querySelector('main');
+const tabs = [...document.querySelectorAll('.tabs a')];
+
+function match(hash) {
+  const parts = hash.replace(/^#/, '').split('/').filter(Boolean);
+  for (const [pattern, render] of routes) {
+    const shape = pattern.replace(/^#/, '').split('/').filter(Boolean);
+    if (shape.length !== parts.length) continue;
+    const params = {};
+    let hit = true;
+    for (let i = 0; i < shape.length; i++) {
+      if (shape[i].startsWith(':')) params[shape[i].slice(1)] = decodeURIComponent(parts[i]);
+      else if (shape[i] !== parts[i]) { hit = false; break; }
+    }
+    if (hit) return { render, params, tab: TAB_OF[parts[0]] ?? 'tonight' };
+  }
+  return null;
+}
+
+const ctx = {
+  store,
+  params: {},
+  navigate: hash => { location.hash = hash; },
+  now: () => new Date(),
+};
+
+let cleanup = null;
+
+function route() {
+  const hit = match(location.hash || '#/tonight');
+  if (!hit) {
+    // An unknown or stale hash is not worth a dead screen at 3am.
+    history.replaceState(null, '', '#/tonight');
+    route();
+    return;
+  }
+
+  if (cleanup) cleanup();
+  cleanup = null;
+  screen.replaceChildren();
+
+  ctx.params = hit.params;
+  cleanup = hit.render(screen, ctx) ?? null;
+
+  for (const tab of tabs) {
+    if (tab.dataset.tab === hit.tab) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  main.scrollTop = 0;
+}
+
+window.addEventListener('hashchange', route);
+
+/* ── Boot ───────────────────────────────────────────────────────────────── */
 document.getElementById('ver').textContent = VERSION;
-renderLast();
-show('tonight');
+
+// A cold launch always opens Tonight, whatever the last visit was (handoff
+// rule 8). replaceState, so the back gesture leaves the app instead of
+// bouncing between the restored hash and this one.
+history.replaceState(null, '', '#/tonight');
+route();

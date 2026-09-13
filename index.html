@@ -33,37 +33,12 @@
 </header>
 
 <main>
-  <!-- ───────────────────────── Tonight ───────────────────────── -->
-  <section class="view" id="view-tonight" data-view="tonight">
-    <div class="title-art">
-      <img class="art" src="assets/art/bedtime-moon.jpg" alt="">
-      <div>
-        <p class="overline">—</p>
-        <h2>Tonight</h2>
-      </div>
-    </div>
-    <p class="summary" id="summary">No night open</p>
+  <!-- Router container: js/app.js mounts one screen module here. -->
+  <div class="view" id="screen"></div>
 
-    <div class="grid">
-      <button class="ev action" data-ev="selfToilet"><svg class="ico"><use href="#i-toilet"/></svg><span>She asked to pee</span></button>
-      <button class="ev action" data-ev="lift"><svg class="ico"><use href="#i-carry"/></svg><span>I lifted her</span></button>
-      <button class="ev action" data-ev="drink"><svg class="ico"><use href="#i-water"/></svg><span>Water</span></button>
-      <button class="ev action" data-ev="wake"><svg class="ico"><use href="#i-wake"/></svg><span>Woke up</span></button>
-      <button class="ev action wet" data-ev="wet"><svg class="ico"><use href="#i-drop"/></svg><span>Wet bed</span></button>
-    </div>
-
-    <div class="last saved" id="last">
-      <span id="last-text">Nothing logged yet</span>
-      <button id="undo" hidden><svg class="ico"><use href="#i-undo"/></svg><span>Undo</span></button>
-    </div>
-  </section>
-
-  <!-- ───────────────────────── History ───────────────────────── -->
-  <section class="view" id="view-history" data-view="history" hidden>
-    <p class="stub">History, editing and charts arrive in M3–M4.</p>
-  </section>
-
-  <!-- ───────────────────────── Check ───────────────────────── -->
+  <!-- ───────────────────────── Check ─────────────────────────
+       Moved in and out of #screen by the router, so its buttons
+       keep their listeners. -->
   <section class="view" id="view-check" data-view="check" hidden>
     <h2>Install check</h2>
     <p class="stub">Everything M1 depends on. Check this on the phone, then turn
@@ -78,9 +53,9 @@
 </main>
 
 <nav class="tabs">
-  <button data-tab="tonight" class="on"><svg class="ico"><use href="#i-moon"/></svg><span>Tonight</span></button>
-  <button data-tab="history"><svg class="ico"><use href="#i-history"/></svg><span>History</span></button>
-  <button data-tab="check"><svg class="ico"><use href="#i-check"/></svg><span>Check</span></button>
+  <a href="#/tonight" data-tab="tonight" aria-current="page"><svg class="ico"><use href="#i-moon"/></svg><span>Tonight</span></a>
+  <a href="#/history" data-tab="history"><svg class="ico"><use href="#i-history"/></svg><span>History</span></a>
+  <a href="#/check" data-tab="check"><svg class="ico"><use href="#i-check"/></svg><span>Check</span></a>
 </nav>
 
 <script type="module" src="js/app.js"></script>

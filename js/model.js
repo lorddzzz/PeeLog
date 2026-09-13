@@ -70,6 +70,23 @@ export function nightIdFor(date) {
   return date.getHours() >= NIGHT_START_HOUR ? id : shiftDate(id, -1);
 }
 
+// The night an existing timestamp belongs to, read from the wall clock it was
+// recorded at. Going through a Date would reinterpret it in the device's
+// current zone, which is exactly the travel case we store offsets to survive.
+export function nightIdForIso(iso) {
+  const p = parseIso(iso);
+  if (!p) return null;
+  return +p.time.slice(0, 2) >= NIGHT_START_HOUR ? p.date : shiftDate(p.date, -1);
+}
+
+// The inverse, for a time typed into a field on a known night: 02:12 on the
+// night of the 13th is the calendar date of the 14th.
+export function dateForNightTime(nightId, timeStr) {
+  const t = typeof timeStr === 'string' ? /^(\d{2}):(\d{2})$/.exec(timeStr) : null;
+  if (!t || !isDateStr(nightId) || +t[1] > 23 || +t[2] > 59) return null;
+  return +t[1] >= NIGHT_START_HOUR ? nightId : shiftDate(nightId, 1);
+}
+
 export const prevNightId = id => shiftDate(id, -1);
 
 // night.day describes the day AFTER the night — the bowel overlay compares
@@ -81,6 +98,8 @@ export const dayDateFor = nightId => shiftDate(nightId, 1);
    ("13 September", not "September 13") and must not follow the device locale. */
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -95,6 +114,12 @@ function dateParts(dateStr) {
 export function dayLabelFor(dateStr) {
   const p = dateParts(dateStr);
   return p ? `${WEEKDAYS[p.wd]}, ${p.d} ${MONTHS[p.mo]}` : '';
+}
+
+// 'Sunday' — the stale-night link names the weekday in full.
+export function weekdayNameFor(dateStr) {
+  const p = dateParts(dateStr);
+  return p ? WEEKDAY_NAMES[p.wd] : '';
 }
 
 // 'Night of Sun, 13 September'
@@ -451,6 +476,17 @@ export function activeNightFor(doc, now = new Date()) {
   if (active && active >= current) return { id: active, stale: null };
   const pending = active && !isReviewed(findNight(doc, active)) ? active : null;
   return { id: current, stale: pending };
+}
+
+// Opening tonight moves activeNightId on, so activeNightFor can no longer see
+// yesterday. The review link must survive the first tap of the new evening, so
+// it is asked for separately: the night before this one, if it was recorded and
+// nobody has reviewed it. Only the night before — an old gap is History's job,
+// not a nightly nag.
+export function pendingReviewFor(doc, nightId) {
+  const previous = prevNightId(nightId);
+  const night = findNight(doc, previous);
+  return night && !isReviewed(night) ? previous : null;
 }
 
 /* ── Migration ──────────────────────────────────────────────────────── */

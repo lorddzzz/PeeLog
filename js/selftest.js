@@ -4,9 +4,10 @@
 
 import { createStore, STORE_KEY } from './store.js';
 import {
-  activeNightFor, composeIso, dayDateFor, emptyDoc, eventSummary, findNight,
-  insertEvent, latestEvent, migrate, newEvent, newNight, nightIdFor, openNight,
-  parseIso, prevNightId, removeEvent, toIso, validateDoc,
+  activeNightFor, composeIso, dateForNightTime, dayDateFor, emptyDoc,
+  eventSummary, findNight, insertEvent, latestEvent, migrate, newEvent,
+  newNight, nightIdFor, nightIdForIso, openNight, parseIso, pendingReviewFor,
+  prevNightId, removeEvent, toIso, validateDoc,
 } from './model.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -283,6 +284,47 @@ export function runSelfTests() {
     a = activeNightFor(doc, now);
     assert(a.id === '2026-09-13' && a.stale === null, 'the open night was not kept');
     return 'Tonight moves on, the unreviewed night is carried as a link';
+  });
+
+  t('A tap lands in tonight while a stale night waits', () => {
+    // The exact sequence Tonight runs on a tap: which night, then open it and
+    // insert. The unreviewed night must keep its own events and gain none.
+    const doc = emptyDoc();
+    const yesterday = openNight(doc, '2026-09-12');
+    insertEvent(yesterday, newEvent('wet', '2026-09-13T02:00:00+02:00'));
+
+    const now = new Date(2026, 8, 13, 23, 40);
+    const active = activeNightFor(doc, now);
+    assert(active.id === '2026-09-13' && active.stale === '2026-09-12', `active ${active.id}, stale ${active.stale}`);
+
+    const night = openNight(doc, active.id);
+    insertEvent(night, newEvent('drink', toIso(now)));
+    assert(doc.activeNightId === '2026-09-13', 'the new night was not opened');
+    assert(findNight(doc, '2026-09-12').events.length === 1, 'the stale night absorbed the new event');
+    assert(findNight(doc, '2026-09-13').events.length === 1, 'the event did not land in tonight');
+    // activeNightFor has moved on, so the review link comes from the document.
+    assert(activeNightFor(doc, now).stale === null, 'activeNightFor still reports the night it left');
+    assert(pendingReviewFor(doc, '2026-09-13') === '2026-09-12', 'the review link disappeared after logging');
+
+    findNight(doc, '2026-09-12').morning.outcome = 'wet';
+    assert(pendingReviewFor(doc, '2026-09-13') === null, 'a reviewed night still asks for review');
+    assert(pendingReviewFor(doc, '2026-09-12') === null, 'a night that was never recorded asks for review');
+    return 'Logged into 09-13; 09-12 keeps its event and its review link';
+  });
+
+  t('A typed time belongs to the right calendar date', () => {
+    // 02:12 on the night of the 13th is the 14th; 23:40 is still the 13th.
+    assert(dateForNightTime('2026-09-13', '23:40') === '2026-09-13', 'an evening time moved date');
+    assert(dateForNightTime('2026-09-13', '15:00') === '2026-09-13', '15:00 must stay on the evening date');
+    assert(dateForNightTime('2026-09-13', '14:59') === '2026-09-14', '14:59 must be the morning after');
+    assert(dateForNightTime('2026-09-13', '02:12') === '2026-09-14', 'an after-midnight time stayed on the evening date');
+    assert(dateForNightTime('2026-09-30', '02:12') === '2026-10-01', 'month boundary');
+    assert(dateForNightTime('2026-09-13', 'half nine') === null, 'a bad time was accepted');
+    // And the inverse, read from the stored offset rather than the device zone.
+    assert(nightIdForIso('2026-09-14T02:12:00+02:00') === '2026-09-13', 'after midnight belongs to the evening before');
+    assert(nightIdForIso('2026-09-13T23:40:00-05:00') === '2026-09-13', 'an evening stamp moved night');
+    assert(nightIdForIso('2026-09-14T14:59:00+02:00') === '2026-09-13', '14:59 must still be the previous night');
+    return '23:40 → 09-13 · 02:12 → 09-14 · and back again';
   });
 
   t('The day block belongs to the day after', () => {
