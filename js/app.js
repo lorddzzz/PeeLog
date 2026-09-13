@@ -1,32 +1,54 @@
-// PeeLog M1 — boot, hash router, tab bar. Screens own their own DOM; this
-// file only decides which one is mounted and holds the single store.
+// PeeLog — boot, hash router, tab bar. Screens own their own DOM; this file
+// only decides which one is mounted and holds the single store.
 
-import { runChecks, renderChecks, runSelfTests } from './selftest.js';
 import { createStore } from './store.js';
-import { exportFileName } from './model.js';
-import { linkRow, paint, title } from './ui.js';
 import { render as renderTonight, renderEvent } from './tonight.js';
 import { renderDay, renderEvening, renderMorning } from './cards.js';
 import {
   render as renderHistory, renderBackfill, renderEventEdit, renderNight,
 } from './history.js';
+import { render as renderPatterns } from './patterns.js';
+import {
+  render as renderRoutines, renderDetail as renderRoutine, renderNew as renderRoutineNew,
+} from './routines.js';
+import { renderBackup, renderExport, renderRestore } from './backup.js';
+import {
+  render as renderMore, renderAppearance, renderInstall, renderPrivacy, renderWelcome,
+} from './more.js';
+import { render as renderSummary } from './summary.js';
 
-export const VERSION = '0.2.0-m1';
+export const VERSION = '0.3.0-m5';
 
 /* ── Service worker ─────────────────────────────────────────────────────
    Registered with a relative path so the scope follows the deploy
    directory. GitHub Pages serves project sites from /<repo>/, so nothing
    here may use a root-absolute path. */
 let swReg = null;
+let updateReady = false;
+
 if ('serviceWorker' in navigator) {
+  // A page that was already controlled and then gets a new controller is
+  // running older code than the cache now holds: sw.js calls skipWaiting, so
+  // there is rarely a `waiting` worker to look at. More → Install says so
+  // without reloading anything under a half-finished edit (S01).
+  const controlled = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (controlled) updateReady = true;
+  });
   window.addEventListener('load', async () => {
     try {
       swReg = await navigator.serviceWorker.register('sw.js');
+      if (swReg.waiting && controlled) updateReady = true;
     } catch (err) {
       console.warn('SW registration failed', err);
     }
   });
 }
+
+const sw = {
+  update: () => swReg?.update(),
+  updateReady: () => updateReady || !!swReg?.waiting,
+};
 
 /* ── Store ──────────────────────────────────────────────────────────────── */
 const store = createStore();
@@ -59,67 +81,6 @@ const applyArt = doc => document.body.classList.toggle('no-art', doc.settings?.a
 applyArt(store.get());
 store.subscribe(applyArt);
 
-/* ── Screens still to come ──────────────────────────────────────────────
-   History's subnav names all three sections from M3, so both of the others
-   answer for themselves rather than bouncing to a dead hash. */
-
-const soon = name => el => paint(el, [
-  title({ overline: 'History', name, lead: 'This part of History arrives in the next update.' }),
-  linkRow({ label: 'Back to Nights', href: '#/history' }),
-]);
-
-const renderPatterns = soon('Patterns');
-const renderRoutines = soon('Routines');
-
-/* ── Install check ──────────────────────────────────────────────────────
-   Its markup stays in index.html and is moved in and out of the router's
-   container, so its buttons keep their listeners across navigation. */
-const checkSection = document.getElementById('view-check');
-checkSection.remove();
-checkSection.hidden = false;
-
-async function refreshChecks() {
-  // Detached from the document between visits, so the rows are looked up
-  // inside the section rather than by id.
-  renderChecks(checkSection.querySelector('#checks'), [...await runChecks(VERSION), ...runSelfTests()]);
-}
-
-function renderCheck(el) {
-  el.replaceChildren(checkSection);
-  refreshChecks();
-}
-
-checkSection.querySelector('#recheck').addEventListener('click', refreshChecks);
-
-checkSection.querySelector('#persist').addEventListener('click', async () => {
-  if (navigator.storage?.persist) await navigator.storage.persist();
-  refreshChecks();
-});
-
-checkSection.querySelector('#update').addEventListener('click', async () => {
-  await swReg?.update();
-  location.reload();
-});
-
-// The escape hatch (IMPLEMENTATION.md §4, commit 1e): a bare JSON download,
-// no share sheet, no date range. Whether a blob: download has anywhere to go
-// in iOS standalone mode is unverified — see AGENTS.md "Done means verified".
-checkSection.querySelector('#export-json').addEventListener('click', () => {
-  const name = exportFileName(new Date());
-  const blob = new Blob([JSON.stringify(store.get(), null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  const status = checkSection.querySelector('#export-status');
-  status.textContent = `Exported ${name}`;
-  status.hidden = false;
-});
-
 /* ── Router ─────────────────────────────────────────────────────────────
    Hash routes, so the phone's back gesture works and a committed field
    survives it (handoff rule 7). Adding a screen is one import and one row. */
@@ -136,7 +97,20 @@ const routes = [
   ['#/night/:nightId/event/:eventId', renderEventEdit],
   ['#/patterns', renderPatterns],
   ['#/routines', renderRoutines],
-  ['#/check', renderCheck],
+  ['#/routines/new', renderRoutineNew],
+  ['#/routines/:id', renderRoutine],
+  ['#/more', renderMore],
+  ['#/more/backup', renderBackup],
+  ['#/more/restore', renderRestore],
+  ['#/more/export', renderExport],
+  ['#/more/appearance', renderAppearance],
+  ['#/more/install', renderInstall],
+  ['#/more/privacy', renderPrivacy],
+  ['#/summary', renderSummary],
+  ['#/welcome', renderWelcome],
+  // The Check tab's own hash, kept so a bookmark from before M5 still lands
+  // where its rows moved to.
+  ['#/check', renderInstall],
 ];
 
 // Which tab owns a route. Detail screens stay under the tab they came from.
@@ -144,7 +118,7 @@ const TAB_OF = {
   tonight: 'tonight', event: 'tonight', morning: 'tonight', evening: 'tonight',
   history: 'history', night: 'history', patterns: 'history', day: 'history',
   routines: 'history',
-  check: 'check',
+  more: 'more', summary: 'more', check: 'more', welcome: 'tonight',
 };
 
 const screen = document.getElementById('screen');
@@ -172,6 +146,9 @@ const ctx = {
   params: {},
   navigate: hash => { location.hash = hash; },
   now: () => new Date(),
+  // The build and the service worker, for More → Install & offline. Passed
+  // in rather than imported, so no screen has to import app.js back.
+  app: { version: VERSION, sw },
 };
 
 let cleanup = null;
@@ -205,7 +182,10 @@ window.addEventListener('hashchange', route);
 document.getElementById('ver').textContent = VERSION;
 
 // A cold launch always opens Tonight, whatever the last visit was (handoff
-// rule 8). replaceState, so the back gesture leaves the app instead of
-// bouncing between the restored hash and this one.
-history.replaceState(null, '', '#/tonight');
+// rule 8) — except the very first one on a phone with nothing recorded, which
+// gets Welcome once. replaceState, so the back gesture leaves the app instead
+// of bouncing between the restored hash and this one.
+const first = store.get();
+const firstRun = !first.nights.length && first.settings?.welcomed !== true;
+history.replaceState(null, '', firstRun ? '#/welcome' : '#/tonight');
 route();

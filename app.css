@@ -615,3 +615,177 @@ textarea {
 }
 .tabs a[aria-current] { color: var(--accent); }
 .tabs .ico { width: 21px; height: 21px; }
+
+/* ── Patterns ────────────────────────────────────────────────────────── */
+/* Chart colour classes read by charts.js's SVG strings — clay for wetting,
+   slate for timing, never the only carrier of meaning (every value is also
+   printed as text beside it). */
+.c-wet    { color: var(--wet); }
+.c-timing { color: #B1BDD1; }
+.c-axis   { color: var(--secondary); }
+.c-label  { color: var(--text); }
+.chart { display: block; width: 100%; }
+
+.metric { padding: 18px 0; border-bottom: 1px solid var(--border); }
+.metric h3 { font-size: var(--size-secondary); font-weight: 500; margin: 0; }
+.metric .value { font: 400 30px/1.2 var(--font-heading); margin: 5px 0; color: var(--text); }
+.metric > p { font-size: var(--size-secondary); color: var(--secondary); margin: 5px 0; }
+
+/* A comparison metric's figure is a sample count, not a headline number, so
+   it reads quieter than a single-question metric's serif value. */
+.metric.comparison .value { font-size: 20px; color: var(--secondary); }
+
+/* ── Routines, More and backup (X01–X04, M01–M03, B01–B07) ───────────── */
+
+/* A read-only field: a value that was recorded elsewhere and is only being
+   named here (a file name, a last-included evening). */
+.field-value {
+  font-size: var(--size-body);
+  color: var(--text);
+  padding: 11px 0;
+  word-break: break-word;
+}
+.field-value.empty { color: var(--secondary); }
+
+.tag {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--secondary);
+  font-size: var(--size-meta);
+  letter-spacing: 0.4px;
+  padding: 4px 10px;
+  margin-bottom: 14px;
+}
+
+/* Past ten days the backup age takes the colour used for wet observations —
+   the only place in More that is not the ordinary secondary grey. */
+.linkrow small.overdue { color: var(--wet); }
+
+.ordered { margin: 0 0 18px; padding-left: 20px; font-size: var(--size-secondary); color: var(--text); }
+.ordered li { margin: 7px 0; }
+
+/* A switch, not a checkbox: it reads as on/off at a glance in the dark. */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 60px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--size-secondary);
+}
+.toggle-row small { display: block; margin: 3px 0 0; }
+.toggle {
+  flex: none;
+  position: relative;
+  width: 58px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  cursor: pointer;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 27px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #181B21;
+}
+.toggle.off { background: var(--surface); border-color: var(--border); }
+.toggle.off::after { left: 3px; background: var(--secondary); }
+/* Unsupported is a readable state, not faint disabled text (S01). */
+.toggle.disabled { opacity: 0.55; border-style: dashed; cursor: default; }
+
+/* The appearance preview keeps its height when the illustration goes, so
+   nothing below it moves (M02). */
+.preview { height: 170px; margin-bottom: 16px; }
+.art-off {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-field);
+  color: var(--secondary);
+  font-size: var(--size-secondary);
+}
+
+/* B03's preview of a backup, before anything is applied. */
+.preview-table { width: 100%; border-collapse: collapse; font-size: var(--size-secondary); margin: 4px 0 18px; }
+.preview-table td { padding: 11px 0; border-bottom: 1px solid var(--border); }
+.preview-table td:last-child { text-align: right; color: var(--secondary); }
+
+input[type="file"] { font-size: var(--size-secondary); color: var(--secondary); padding: 12px 0; }
+
+/* ── Printable summary (O02) ────────────────────────────────────────────
+   The only light surface in the app, and it is only ever reached by asking
+   for the print preview. The app around it stays dark. */
+.summary {
+  display: block;
+  background: #FAF8F2;
+  color: #26303C;
+  font: 13px/1.4 var(--font-body);
+  padding: 26px 22px;
+  margin: 18px 0;
+  border-radius: 4px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.summary-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #687382;
+  padding-bottom: 12px;
+}
+.summary .brand { font-size: 18px; font-weight: 600; letter-spacing: -0.6px; }
+.summary .sample { font-size: 11px; letter-spacing: 1.4px; color: #5A6573; }
+.summary h1 { font: 400 28px/1.2 var(--font-heading); letter-spacing: -0.6px; margin: 16px 0 6px; color: #26303C; }
+.summary .period { font-size: 13px; color: #566170; margin: 0 0 16px; }
+.summary-coverage { font-size: 12px; background: #EAE7DE; padding: 10px 12px; margin: 12px 0 14px; }
+.summary h2 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; color: #26303C; }
+.summary .figures { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.summary .figure { padding: 10px 0; border-top: 2px solid #97A1B0; }
+.summary .figure span { display: block; font-size: 12px; color: #4F5C6C; }
+.summary .figure b { display: block; font: 400 26px/1.3 var(--font-heading); margin: 4px 0; }
+.summary .figure small { font-size: 11px; color: #5A6573; }
+.summary .twocol { display: grid; grid-template-columns: 1fr; gap: 0 24px; }
+.summary table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.summary td { padding: 4px 0; border-bottom: 1px solid #D6D8D8; }
+.summary td:last-child { text-align: right; }
+.summary .notes { padding: 0; margin: 6px 0; list-style: none; font-size: 12px; }
+.summary .notes li { padding: 4px 0; border-bottom: 1px solid #D6D8D8; }
+.summary .notes strong { font-weight: 500; }
+.summary .note { background: #EFEDE5; padding: 12px; font-size: 12px; margin-top: 8px; }
+.summary .foot { border-top: 1px solid #B7BEC5; margin-top: 14px; padding-top: 10px; font-size: 10px; color: #566170; }
+.summary .foot p { margin: 6px 0; }
+
+@page { size: A4; margin: 12mm; }
+
+/* Printing is only ever asked for from the summary route; everything that
+   belongs to the app rather than the sheet comes off the page. */
+@media print {
+  html, body { background: #FFF; color: #26303C; height: auto; display: block; }
+  .top, .tabs, .banner, .button, .linkrow, .field, .overline, main > .view > h2,
+  main > .view > .lead { display: none !important; }
+  main { overflow: visible; }
+  .view { padding: 0; }
+  .summary { margin: 0; padding: 0; border-radius: 0; background: #FFF; }
+  .summary .figures { grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .summary .twocol { grid-template-columns: 1fr 1fr; }
+  .summary h2, .summary .figure, .summary .twocol, .summary .note { break-inside: avoid; }
+  .summary h2 { break-after: avoid; }
+}
+
+/* Wide enough for two columns on screen as well, once the phone is not the
+   constraint. */
+@media (min-width: 560px) {
+  .summary .figures { grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .summary .twocol { grid-template-columns: 1fr 1fr; }
+}

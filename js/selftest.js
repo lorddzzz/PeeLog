@@ -13,7 +13,11 @@ import {
   pendingReviewFor, prevNightId, removeDrink, removeEvent, restoreNight,
   retypeEvent, setNoDrinks, stepValue, suggestedEveningTimes, toggleSleepSign,
   toIso, validateDoc,
+  applyRestore, assignExperiment, csvEscape, csvRows, csvText, daysSince,
+  endExperiment, newExperiment, readBackup, restorePlan,
 } from './model.js';
+import { metricsSelfTests } from './selftest-metrics.js';
+import { summaryData } from './summary.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
 const warn = (k, v) => ({ k, v, s: 'warn' });
@@ -845,6 +849,191 @@ export function runSelfTests() {
     return 'Existing date → exists:true · tomorrow → future:true · ensureNight never duplicates';
   });
 
+  /* ── M5: export, restore, routines ──────────────────────────────────
+     The three things that can lose data: a CSV that misquotes a note, a
+     restore that half-applies, and a routine that re-labels nights it
+     never covered. */
+
+  // RFC 4180 in reverse, so the round-trip is asserted against a reader that
+  // knows nothing about how csvText wrote it.
+  const parseCsv = text => {
+    const rows = [[]];
+    let field = '';
+    let quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c !== '"') field += c;
+        else if (text[i + 1] === '"') { field += '"'; i++; }
+        else quoted = false;
+        continue;
+      }
+      if (c === '"') { quoted = true; continue; }
+      if (c === ',') { rows[rows.length - 1].push(field); field = ''; continue; }
+      if (c === '\r' && text[i + 1] === '\n') {
+        rows[rows.length - 1].push(field);
+        field = '';
+        rows.push([]);
+        i++;
+        continue;
+      }
+      field += c;
+    }
+    if (field !== '' || rows[rows.length - 1].length) rows[rows.length - 1].push(field);
+    if (!rows[rows.length - 1].length) rows.pop();
+    return rows;
+  };
+
+  t('CSV quoting survives a note with a comma, a quote and a newline', () => {
+    const doc = emptyDoc();
+    const night = ensureNight(doc, '2026-09-13');
+    const note = 'wet, "soaked"\nand upset';
+    night.morning.note = note;
+    night.morning.changes = 0;
+    night.evening.asleepAt = '2026-09-13T20:00:00+02:00';
+    const ev = newEvent('wet', '2026-09-14T02:12:00+02:00');
+    ev.id = 'e-csv001';
+    insertEvent(night, ev);
+
+    assert(csvEscape(note) === '"wet, ""soaked""\nand upset"', 'the note was not quoted per RFC 4180');
+    assert(csvEscape(null) === '', 'a null field is not blank');
+    assert(csvEscape(0) === '0', 'a zero was exported as blank');
+    assert(csvEscape(false) === 'no', 'an answered false lost its answer');
+
+    const [header] = csvRows(doc, null, null);
+    const back = parseCsv(csvText(doc, null, null));
+    const at = name => back[1][header.indexOf(name)];
+    assert(back.length === 2, `expected one night row, got ${back.length - 1}`);
+    assert(at('morning_note') === note, 'the note did not round-trip');
+    assert(at('outcome') === '', 'an unreviewed night exported an outcome');
+    assert(at('changes') === '0', 'a recorded zero came back blank');
+    assert(at('wet_events') === '1', 'the wet event was not counted');
+    assert(at('hours_after_asleep') === '6.2', `first wetting was ${at('hours_after_asleep')}h, expected 6.2`);
+    return 'Quoted, doubled, and read back identical · nulls blank · 0 stays 0';
+  });
+
+  t('A file that is not a backup is refused without touching the log', () => {
+    const local = emptyDoc();
+    ensureNight(local, '2026-09-12');
+    const before = JSON.stringify(local);
+
+    assert(readBackup('{ not json').message === 'This file isn’t a readable backup.', 'broken JSON got the wrong message');
+    assert(readBackup('night,routine,wore\n2026-09-13,,').message === 'This is a CSV file, not a JSON backup.', 'a CSV was not recognised');
+    assert(readBackup(JSON.stringify({ version: 2, nights: [], experiments: [], settings: {} })).message
+      === 'This backup needs a newer version of PeeLog.', 'a newer version was not refused');
+    assert(readBackup(JSON.stringify({ hello: 'world' })).ok === false, 'a JSON file that is not a backup was accepted');
+    assert(readBackup(JSON.stringify(local)).ok === true, 'a real backup was refused');
+    assert(JSON.stringify(local) === before, 'reading a backup changed the local document');
+    return 'Broken JSON, a CSV and a newer version each named · nothing changed';
+  });
+
+  t('Add missing nights keeps the dates already on this phone', () => {
+    const make = ids => { const d = emptyDoc(); for (const id of ids) ensureNight(d, id); return d; };
+    const local = make(['2026-09-11', '2026-09-12']);
+    const incoming = make(['2026-09-10', '2026-09-11']);
+    // A local night that also exists in the file must come out untouched.
+    findNight(local, '2026-09-11').morning.outcome = 'dry';
+
+    const plan = restorePlan(local, incoming, 'add');
+    assert(plan.added === 1 && plan.skipped === 1, `add plan said ${plan.added} added / ${plan.skipped} skipped`);
+
+    const replace = restorePlan(local, incoming, 'replace');
+    assert(replace.replaced === 2, `replace reported ${replace.replaced} local nights, expected 2`);
+    assert(replace.added === 2 && replace.skipped === 0, 'replace skipped something');
+
+    const next = applyRestore(local, incoming, 'add');
+    assert(!next.error, `add failed: ${next.error}`);
+    assert(next.nights.map(n => n.id).join() === '2026-09-10,2026-09-11,2026-09-12', 'merged nights are out of order or missing');
+    assert(findNight(next, '2026-09-11').morning.outcome === 'dry', 'an existing date was overwritten');
+
+    const replaced = applyRestore(local, incoming, 'replace');
+    assert(replaced.nights.map(n => n.id).join() === '2026-09-10,2026-09-11', 'replace did not take the file wholesale');
+    return '1 added, 1 skipped, order kept · replace reports 2 local nights';
+  });
+
+  t('A damaged routine reference blocks the whole restore', () => {
+    const local = emptyDoc();
+    ensureNight(local, '2026-09-12');
+    const incoming = emptyDoc();
+    ensureNight(incoming, '2026-09-10').experimentId = 'exp-ghost';
+    ensureNight(incoming, '2026-09-11');
+    const localBefore = JSON.stringify(local);
+    const incomingBefore = JSON.stringify(incoming);
+
+    const plan = restorePlan(local, incoming, 'add');
+    assert(plan.conflicts.length === 1, `expected 1 conflict, got ${plan.conflicts.length}`);
+    assert(plan.conflicts[0].nightId === '2026-09-10', 'the conflict named the wrong night');
+
+    const result = applyRestore(local, incoming, 'add');
+    assert(result.error, 'a damaged reference was applied anyway');
+    assert(JSON.stringify(local) === localBefore, 'the local document changed on a refused restore');
+    assert(JSON.stringify(incoming) === incomingBefore, 'the backup was mutated while being read');
+
+    // With the routine present, the same file applies and brings it along.
+    incoming.experiments.push({ id: 'exp-ghost', name: 'Earlier lights out', from: '2026-09-10', to: null, note: '' });
+    const fixed = applyRestore(local, incoming, 'add');
+    assert(!fixed.error, `the repaired backup still failed: ${fixed.error}`);
+    assert(fixed.experiments.length === 1, 'the referenced routine was not imported');
+    return 'Blocked, nothing applied, both documents unchanged · repaired file imports its routine';
+  });
+
+  t('A routine tags its own nights and no earlier ones', () => {
+    const doc = emptyDoc();
+    for (const id of ['2026-08-31', '2026-09-01', '2026-09-02']) ensureNight(doc, id);
+    const exp = newExperiment('Earlier lights out', '2026-09-01', '');
+    doc.experiments.push(exp);
+    assert(assignExperiment(doc, exp) === 2, 'the wrong number of nights joined the routine');
+    assert(findNight(doc, '2026-08-31').experimentId === null, 'a night before the start was rewritten');
+    assert(findNight(doc, '2026-09-01').experimentId === exp.id, 'the start evening did not join');
+
+    // A night created afterwards tags itself, and one backfilled before the
+    // start still does not.
+    assert(ensureNight(doc, '2026-09-03').experimentId === exp.id, 'a new night did not pick up the routine');
+    assert(ensureNight(doc, '2026-08-30').experimentId === null, 'a backfilled older night was tagged');
+
+    endExperiment(doc, exp.id, '2026-09-02');
+    assert(exp.to === '2026-09-02', 'the end date was not recorded');
+    assert(findNight(doc, '2026-09-02').experimentId === exp.id, 'the last included evening lost its routine');
+    assert(findNight(doc, '2026-09-03').experimentId === null, 'a night past the end kept the routine');
+    assert(ensureNight(doc, '2026-09-04').experimentId === null, 'a night after the end was assigned to it');
+    return 'Tags from the start evening on · ends inclusive, later nights unassigned';
+  });
+
+  t('The summary sheet counts its own denominators', () => {
+    const doc = emptyDoc();
+    const first = ensureNight(doc, '2026-09-10');
+    first.morning.outcome = 'dry';
+    first.morning.sleepSigns = ['snoring'];
+    first.day.stool = 'hard';
+    first.day.urgency = true;
+    first.day.toiletCount = 6;
+
+    const second = ensureNight(doc, '2026-09-11');
+    second.morning.outcome = 'wet';
+    second.evening.asleepAt = '2026-09-11T20:00:00+02:00';
+    const ev = newEvent('wet', '2026-09-12T00:00:00+02:00');
+    ev.id = 'e-sum001';
+    ev.noticed = 'self';
+    insertEvent(second, ev);
+
+    const s = summaryData(doc, '2026-09-10', '2026-09-11', new Date(2026, 8, 13, 9, 0));
+    assert(s.nights === 2, `range held ${s.nights} nights`);
+    assert(s.sample === false, 'a real document was marked Sample');
+    assert(s.coverage.reviewed === 2, 'coverage lost a reviewed night');
+    assert(s.wet.wet === 1 && s.wet.reviewed === 2, 'wet nights counted wrong');
+    assert(s.wet.rate === null, 'a rate was published below the sample threshold');
+    assert(s.first.eligible === 1 && s.first.median === 4, `first wetting was ${s.first.median}h, expected 4`);
+    assert(s.noticed.self === 1 && s.noticed.known === 1, 'noticing lost its denominator');
+    // night.day describes the day AFTER that night, so 09-10's hard stool is
+    // the daytime preceding 09-11 — one recorded answer, not two.
+    assert(s.bowel.recorded === 1 && s.bowel.counts.hard === 1, 'the bowel tally is off by a night');
+    assert(s.sleep.answered === 1 && s.sleep.snoring === 1, 'sleep signs lost their denominator');
+    assert(s.daytime.days === 1 && s.daytime.urgency.yes === 1, 'daytime answers counted wrong');
+    assert(s.daytime.toilet.min === 6 && s.daytime.toilet.max === 6, 'toilet range is wrong');
+    assert(daysSince('2026-09-11T09:00:00+02:00', new Date(2026, 8, 13, 9, 0)) === 2, 'daysSince miscounted');
+    return '2 nights · 1 wet of 2 reviewed · median 4h · bowel read from the night before';
+  });
+
   t('The real document was not touched', () => {
     assert(TEST_KEY !== STORE_KEY, 'the tests are pointed at the live key');
     let after = null;
@@ -856,7 +1045,7 @@ export function runSelfTests() {
   rows.unshift(failed
     ? bad('Self-tests', `${failed} of ${rows.length} failed`)
     : ok('Self-tests', `${rows.length} checks passed`));
-  return rows;
+  return [...rows, ...metricsSelfTests()];
 }
 
 export function renderChecks(el, rows) {

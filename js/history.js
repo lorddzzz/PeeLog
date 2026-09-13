@@ -130,7 +130,7 @@ function emptyHistory() {
   ];
 }
 
-function subnav(current) {
+export function subnav(current) {
   const items = [['nights', 'Nights', '#/history'], ['patterns', 'Patterns', '#/patterns'],
     ['routines', 'Routines', '#/routines']];
   return h('nav', { class: 'subnav', 'aria-label': 'History sections' },

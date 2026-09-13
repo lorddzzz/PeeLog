@@ -35,29 +35,12 @@
 <main>
   <!-- Router container: js/app.js mounts one screen module here. -->
   <div class="view" id="screen"></div>
-
-  <!-- ───────────────────────── Check ─────────────────────────
-       Moved in and out of #screen by the router, so its buttons
-       keep their listeners. -->
-  <section class="view" id="view-check" data-view="check" hidden>
-    <h2>Install check</h2>
-    <p class="stub">Everything M1 depends on. Check this on the phone, then turn
-       on Airplane Mode and reopen the app from the home screen.</p>
-    <dl class="checks" id="checks"></dl>
-    <div class="actions">
-      <button id="persist">Request persistent storage</button>
-      <button id="recheck">Re-run checks</button>
-      <button id="update">Check for update</button>
-      <button id="export-json">Export JSON</button>
-    </div>
-    <p class="small" id="export-status" hidden></p>
-  </section>
 </main>
 
 <nav class="tabs">
   <a href="#/tonight" data-tab="tonight" aria-current="page"><svg class="ico"><use href="#i-moon"/></svg><span>Tonight</span></a>
   <a href="#/history" data-tab="history"><svg class="ico"><use href="#i-history"/></svg><span>History</span></a>
-  <a href="#/check" data-tab="check"><svg class="ico"><use href="#i-check"/></svg><span>Check</span></a>
+  <a href="#/more" data-tab="more"><svg class="ico"><use href="#i-more"/></svg><span>More</span></a>
 </nav>
 
 <script type="module" src="js/app.js"></script>

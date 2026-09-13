@@ -359,7 +359,11 @@ export function emptyDoc() {
     activeNightId: null,
     nights: [],
     experiments: [],
-    settings: { lastBackupAt: null, lastBackupConfirmedAt: null, art: true },
+    // `welcomed` is the one-time W01 flag: migrate's fillDefaults adds it to a
+    // document written before M5, so an existing log never sees Welcome.
+    settings: {
+      lastBackupAt: null, lastBackupConfirmedAt: null, art: true, welcomed: false,
+    },
   };
 }
 
@@ -526,6 +530,9 @@ export function ensureNight(draft, id) {
   const found = findNight(draft, id);
   if (found) return found;
   const night = newNight(id);
+  // A routine that is running on this evening owns it from the moment the
+  // night comes into existence, so nothing has to remember to tag it later.
+  night.experimentId = activeExperiment(draft, id)?.id ?? null;
   const at = draft.nights.findIndex(n => n.id > id);
   if (at === -1) draft.nights.push(night);
   else draft.nights.splice(at, 0, night);
@@ -772,6 +779,164 @@ export function backfillTarget(doc, dateStr, now = new Date()) {
   };
 }
 
+/* ── Routines (X01–X04) ─────────────────────────────────────────────────
+   One routine runs at a time; a night belongs to whichever routine's dates
+   cover its evening. Membership is stored on the night so that editing a
+   routine's dates later cannot silently re-label nights that were already
+   compared — only an explicit date edit does that, through assignExperiment. */
+
+export function newExperiment(name, from, note = '') {
+  return { id: rid('exp-'), name: String(name ?? '').trim(), from, to: null, note };
+}
+
+// The routine covering one evening, or null. Night creation asks this, so a
+// night logged tonight carries the routine without anyone tagging it.
+export function activeExperiment(doc, nightId) {
+  if (!isDateStr(nightId)) return null;
+  let best = null;
+  for (const e of Array.isArray(doc?.experiments) ? doc.experiments : []) {
+    if (!e || !isDateStr(e.from) || nightId < e.from) continue;
+    if (e.to && nightId > e.to) continue;
+    // Overlapping routines are not supposed to exist; if a restored file
+    // produced a pair, the later start is the one in force.
+    if (!best || e.from > best.from) best = e;
+  }
+  return best;
+}
+
+// The routine that is still running — what X01 shows as Current, and what
+// X02 has to offer to end before a new one starts.
+export function openExperiment(doc) {
+  const open = (doc?.experiments ?? []).filter(e => e && !e.to);
+  return open.length ? open.reduce((a, b) => (b.from > a.from ? b : a)) : null;
+}
+
+// Tags the nights inside a routine's window. Nights before `from` are never
+// rewritten (X02): a routine that started on the 1st says nothing about the
+// 31st, and back-dating one would rewrite the Before window it is compared to.
+export function assignExperiment(draft, exp) {
+  if (!exp || !isDateStr(exp.from)) return 0;
+  let tagged = 0;
+  for (const night of draft.nights ?? []) {
+    if (night.id < exp.from) continue;
+    if (exp.to && night.id > exp.to) continue;
+    night.experimentId = exp.id;
+    tagged++;
+  }
+  return tagged;
+}
+
+// `lastId` is the final evening the routine includes, and it is inclusive.
+// The caller decides which evening that is: an explicit End uses the last
+// completed night, while starting a replacement ends this one the evening
+// before the new one begins.
+export function endExperiment(draft, id, lastId) {
+  const exp = (draft.experiments ?? []).find(e => e.id === id);
+  if (!exp || !isDateStr(lastId)) return null;
+  exp.to = lastId;
+  // "New nights will have no routine assigned" (X04) — including a night
+  // already recorded past the end date.
+  for (const night of draft.nights ?? []) {
+    if (night.experimentId === id && night.id > lastId) night.experimentId = null;
+  }
+  return exp;
+}
+
+// A routine that never started (a scheduled one) has no comparison to keep,
+// so it can go entirely rather than being ended before it began.
+export function removeExperiment(draft, id) {
+  const at = (draft.experiments ?? []).findIndex(e => e.id === id);
+  if (at === -1) return null;
+  const [exp] = draft.experiments.splice(at, 1);
+  for (const night of draft.nights ?? []) {
+    if (night.experimentId === id) night.experimentId = null;
+  }
+  return exp;
+}
+
+// Whole days elapsed since an instant — "Last backup: 11 days ago". Floored,
+// so it never rounds a backup up to sounding fresher than it is.
+export function daysSince(iso, now = new Date()) {
+  const p = parseIso(iso);
+  if (!p) return null;
+  return Math.max(0, Math.floor((now.getTime() - p.ms) / 86400000));
+}
+
+/* ── CSV (O01) ──────────────────────────────────────────────────────────
+   One row per night, flattened. RFC 4180: a field containing a comma, a
+   quote or a line break is quoted and its quotes doubled. A blank field is
+   a blank field — an unanswered question is never exported as No, 0 or Dry
+   (UX-HANDOFF O01). */
+
+export function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const s = typeof value === 'boolean' ? (value ? 'yes' : 'no') : String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export const CSV_COLUMNS = [
+  'night', 'routine', 'wore',
+  'dinner_at', 'evening_drinks', 'no_drinks', 'last_toilet_at', 'last_toilet_output',
+  'lights_out_at', 'asleep_at', 'asleep_estimated', 'day_context', 'evening_note',
+  'events', 'asked_to_pee', 'lifts', 'night_drinks', 'wakes', 'wet_events',
+  'first_wet_at', 'hours_after_asleep',
+  'outcome', 'wake_at', 'changes', 'mood', 'sleep_signs', 'events_complete',
+  'morning_note',
+  'day_date', 'day_toilet_count', 'day_urgency', 'day_holding', 'day_accidents',
+  'day_stool', 'day_fluids',
+];
+
+function hoursAfterAsleep(night) {
+  const asleep = parseIso(night?.evening?.asleepAt ?? null);
+  const wet = parseIso(firstWetTime(night));
+  if (!asleep || !wet || wet.ms <= asleep.ms) return null;
+  return Math.round(((wet.ms - asleep.ms) / 3600000) * 100) / 100;
+}
+
+const list = value => (Array.isArray(value) && value.length ? value.join('; ') : null);
+
+// Raw values, not text: csvEscape turns them into fields, and the self-test
+// can assert what a note actually round-trips as.
+export function csvRows(doc, fromId, toId) {
+  const rows = [CSV_COLUMNS.slice()];
+  for (const night of doc?.nights ?? []) {
+    if (fromId && night.id < fromId) continue;
+    if (toId && night.id > toId) continue;
+    const { evening = {}, morning = {}, day = {} } = night;
+    const counts = eventCounts(night);
+    const exp = (doc.experiments ?? []).find(e => e.id === night.experimentId) ?? null;
+    rows.push([
+      night.id, exp ? exp.name : null, night.diaper ?? null,
+      evening.dinnerAt ?? null, evening.drinks?.length ?? 0, evening.noDrinks ?? null,
+      evening.lastToiletAt ?? null, evening.lastToiletOutput ?? null,
+      evening.lightsOutAt ?? null, evening.asleepAt ?? null,
+      evening.asleepAt ? !!evening.asleepEstimated : null,
+      list(evening.dayContext), evening.note || null,
+      night.events?.length ?? 0, counts.selfToilet, counts.lift, counts.drink,
+      counts.wake, counts.wet,
+      firstWetTime(night), hoursAfterAsleep(night),
+      morning.outcome ?? null, morning.wakeAt ?? null, morning.changes ?? null,
+      morning.mood ?? null, list(morning.sleepSigns), morning.eventsComplete ?? null,
+      morning.note || null,
+      dayDateFor(night.id), day.toiletCount ?? null, day.urgency ?? null,
+      day.holding ?? null, day.accidents ?? null, day.stool ?? null, day.fluids ?? null,
+    ]);
+  }
+  return rows;
+}
+
+// CRLF line endings, as RFC 4180 specifies, and a trailing one so the last
+// row is terminated like every other.
+export function csvText(doc, fromId, toId) {
+  return `${csvRows(doc, fromId, toId).map(r => r.map(csvEscape).join(',')).join('\r\n')}\r\n`;
+}
+
+export function csvFileName(fromId, toId) {
+  // .peelog.csv, like .peelog.json, is gitignored: an export saved into the
+  // repo directory can never be committed by accident.
+  return `peelog-nights-${fromId}_${toId}.peelog.csv`;
+}
+
 /* ── Migration ──────────────────────────────────────────────────────── */
 
 // Fills keys that were added after a document was written. Only missing keys
@@ -894,4 +1059,165 @@ export function validateDoc(doc) {
   });
 
   return { ok: errors.length === 0, errors };
+}
+
+/* ── Restore (B02–B07) ──────────────────────────────────────────────────
+   Reading a backup and applying one are two separate steps, and neither
+   touches the live document: `readBackup` turns text into a document or one
+   specific message, `restorePlan` says what would change, and `applyRestore`
+   returns a whole new document or an error. Nothing is ever applied in part
+   (UX-HANDOFF B03). */
+
+export const RESTORE_MESSAGES = {
+  unreadable: 'This file isn’t a readable backup.',
+  csv: 'This is a CSV file, not a JSON backup.',
+  notBackup: 'This file isn’t a PeeLog backup.',
+  newer: 'This backup needs a newer version of PeeLog.',
+  empty: 'Nothing to read yet. Choose a file or paste the backup text.',
+};
+
+// A CSV picked by mistake is the likeliest wrong file — it is what O01 hands
+// out — so it gets named rather than lumped in with unreadable JSON.
+const looksLikeCsv = raw =>
+  !raw.startsWith('{') && !raw.startsWith('[') && raw.split('\n', 1)[0].includes(',');
+
+export function readBackup(text) {
+  const raw = typeof text === 'string' ? text.trim() : '';
+  if (!raw) return { ok: false, message: RESTORE_MESSAGES.empty };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Deliberately no excerpt of the text: a parse error must not put private
+    // records on screen (UX-HANDOFF B02).
+    return { ok: false, message: looksLikeCsv(raw) ? RESTORE_MESSAGES.csv : RESTORE_MESSAGES.unreadable };
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.nights)) {
+    return { ok: false, message: RESTORE_MESSAGES.notBackup };
+  }
+
+  const m = migrate(parsed);
+  if (!m.ok) return { ok: false, message: RESTORE_MESSAGES.newer };
+  if (!validateDoc(m.doc).ok) return { ok: false, message: RESTORE_MESSAGES.unreadable };
+  return { ok: true, doc: m.doc };
+}
+
+const idsOf = list => new Set((list ?? []).map(x => x?.id));
+
+// What a restore would do, computed before anything changes. `conflicts` is
+// what blocks it; `routineIssues` is what the preview should say out loud but
+// can live with.
+export function restorePlan(local, incoming, mode = 'add') {
+  const localNights = idsOf(local?.nights);
+  const localExp = idsOf(local?.experiments);
+  const incomingExp = idsOf(incoming?.experiments);
+  const nights = incoming?.nights ?? [];
+  const plan = {
+    mode: mode === 'replace' ? 'replace' : 'add',
+    nights: nights.length,
+    routines: (incoming?.experiments ?? []).length,
+    fromId: nights.length ? nights[0].id : null,
+    toId: nights.length ? nights[nights.length - 1].id : null,
+    localNights: local?.nights?.length ?? 0,
+    added: 0,
+    skipped: 0,
+    replaced: 0,
+    routinesAdded: 0,
+    conflicts: [],
+    routineIssues: [],
+  };
+
+  const replacing = plan.mode === 'replace';
+  if (replacing) plan.replaced = plan.localNights;
+
+  const wanted = new Set();
+  for (const night of nights) {
+    const isNew = replacing || !localNights.has(night.id);
+    if (isNew) plan.added++;
+    else { plan.skipped++; continue; }
+
+    const ref = night.experimentId ?? null;
+    if (!ref) continue;
+    // A night pointing at a routine neither document holds is a damaged
+    // reference: it would import a night labelled with a routine nobody can
+    // open, so it blocks the restore (UX-HANDOFF B03).
+    if (incomingExp.has(ref)) wanted.add(ref);
+    else if (!replacing && localExp.has(ref)) { /* already on this phone */ }
+    else {
+      plan.conflicts.push({
+        nightId: night.id,
+        experimentId: ref,
+        text: `The night of ${night.id} names a routine that is missing from this backup.`,
+      });
+    }
+  }
+
+  // Only the routines the imported nights actually point at come across; a
+  // routine nobody references would just add a second "current" one.
+  plan.routineIds = [...wanted];
+  for (const id of wanted) if (!localExp.has(id)) plan.routinesAdded++;
+
+  if (!replacing) {
+    const incomingOpen = (incoming?.experiments ?? []).filter(e => wanted.has(e.id) && !e.to);
+    const localOpen = (local?.experiments ?? []).filter(e => !e.to);
+    if (incomingOpen.length && localOpen.length) {
+      plan.routineIssues.push('This backup brings a routine that is still running, '
+        + 'and one is already running here. End one in Routines.');
+    }
+    const renamed = (incoming?.experiments ?? []).filter(e => {
+      const mine = (local?.experiments ?? []).find(x => x.id === e.id);
+      return mine && mine.name !== e.name;
+    });
+    for (const e of renamed) {
+      plan.routineIssues.push(`“${e.name}” is already recorded here under a different name; `
+        + 'the name on this phone is kept.');
+    }
+  }
+
+  return plan;
+}
+
+function insertNight(draft, night) {
+  const at = draft.nights.findIndex(n => n.id > night.id);
+  if (at === -1) draft.nights.push(night);
+  else draft.nights.splice(at, 0, night);
+}
+
+// Returns the whole new document, or `{ error }` — never a half-applied one.
+// Both inputs are left exactly as they were.
+export function applyRestore(local, incoming, mode = 'add') {
+  if (!validateDoc(incoming).ok) return { error: RESTORE_MESSAGES.unreadable };
+  const plan = restorePlan(local, incoming, mode);
+  if (plan.conflicts.length) return { error: plan.conflicts[0].text };
+
+  let next;
+  if (plan.mode === 'replace') {
+    next = clone(incoming);
+    // Appearance and backup status describe this phone, not the log, so they
+    // stay behind when the log is replaced.
+    next.settings = clone(local?.settings ?? emptyDoc().settings);
+  } else {
+    next = clone(local);
+    const have = idsOf(next.experiments);
+    const referenced = new Set(plan.routineIds ?? []);
+    for (const exp of incoming.experiments ?? []) {
+      if (referenced.has(exp.id) && !have.has(exp.id)) {
+        next.experiments.push(clone(exp));
+        have.add(exp.id);
+      }
+    }
+    const known = idsOf(next.nights);
+    for (const night of incoming.nights ?? []) {
+      if (!known.has(night.id)) insertNight(next, clone(night));
+    }
+  }
+
+  // The merged document has to be as valid as the two it came from — a
+  // duplicate event id across the join would make one of them unreachable.
+  if (!validateDoc(next).ok) {
+    return { error: 'These records cannot be added without changing existing ones.' };
+  }
+  return next;
 }

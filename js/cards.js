@@ -3,10 +3,11 @@
 // stay exactly as they were; M2 fills in the rest of all three cards.
 
 import {
-  DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, addDrink, dayDateFor, dayLabelFor,
-  ensureNight, findDrink, findNight, newDrink, nightIdFor, openNight, outcomeConflict,
-  prevNightId, removeDrink, setNoDrinks, suggestedEveningTimes, timeLabelFor,
-  toggleSleepSign, weekdayNameFor,
+  DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, activeExperiment, addDrink,
+  dayDateFor, dayLabelFor, daysSince, ensureNight, findDrink, findNight,
+  newDrink, nightIdFor, openNight, outcomeConflict, prevNightId, removeDrink,
+  setNoDrinks, suggestedEveningTimes, timeLabelFor, toggleSleepSign,
+  weekdayNameFor,
 } from './model.js';
 import {
   button, checkbox, chipGroup, h, icon, linkRow, notice, paint, savedStrip,
@@ -68,6 +69,7 @@ function reset(nightId) {
   state.failure = null;
   state.detailNote = '';
   state.detailFailure = null;
+  state.nudgeLater = false;
 }
 
 /* ── Writes ─────────────────────────────────────────────────────────────
@@ -132,7 +134,7 @@ function morning(ctx, draw) {
       outcomeButton(ctx, night, 'wet', 'Wet night', 'drop', draw)),
     state.conflict ? conflictNotice(ctx, draw) : null,
     state.failure ? failureNotice(ctx, draw) : null,
-    outcome ? confirmation(ctx, id) : null,
+    outcome ? confirmation(ctx, id, draw) : null,
     h('h3', { text: 'A little more detail' }),
     timeField({
       label: 'Woke at', value: m.wakeAt, dates: dayDateFor(id), k: 'wake',
@@ -217,16 +219,45 @@ function failureNotice(ctx, draw) {
 // R04: same treatment whether the outcome is Dry or Wet, and the buttons
 // above stay visible and editable — this is a confirmation, not a hand-off
 // to a different screen.
-function confirmation(ctx, id) {
+function confirmation(ctx, id, draw) {
   return h('div', {},
     savedStrip({
       text: 'Night outcome recorded',
       detail: 'Morning review saved',
       onOpen: () => ctx.navigate(`#/night/${id}`),
     }),
+    // The weekly nudge sits below the confirmation, never above the outcome
+    // (R04), and only on a Sunday morning.
+    backupNudge(ctx, draw),
     linkRow({ label: 'Back to Tonight', href: '#/tonight', k: 'back-tonight' }),
-    // History (and this route) arrive in M3; today it falls back to Tonight.
     linkRow({ label: 'See this night', href: `#/night/${id}`, k: 'see-night' }));
+}
+
+// DESIGN.md §9.3: one quiet Sunday offer, dismissible for this visit. A
+// backup nobody has confirmed saving counts as none.
+function backupNudge(ctx, draw) {
+  if (state.nudgeLater) return null;
+  const now = ctx.now();
+  if (now.getDay() !== 0) return null;
+  const doc = ctx.store.get();
+  if (!doc.nights.length) return null;
+  const days = daysSince(doc.settings?.lastBackupConfirmedAt ?? null, now);
+  if (days !== null && days <= 7) return null;
+
+  return notice({
+    kind: 'warm',
+    title: 'A separate copy, just in case.',
+    text: days === null
+      ? 'No backup has been saved from this phone yet.'
+      : `It’s been ${days} days since your last backup.`,
+    children: [
+      button({ label: 'Back up now', href: '#/more/backup', k: 'backup-now' }),
+      button({
+        label: 'Later', kind: 'quiet', k: 'backup-later',
+        onClick: () => { state.nudgeLater = true; draw(); },
+      }),
+    ],
+  });
 }
 
 /* ── Evening (R01) ──────────────────────────────────────────────────────
@@ -324,7 +355,7 @@ function evening(ctx, draw) {
       label: 'Note', value: ev.note, k: 'evening-note',
       onCommit: text => writeEvening(ctx, n => { n.evening.note = text; }, draw),
     }),
-    routineRow(doc, night),
+    routineRow(doc, night, id),
     detailNote(eveningState),
     button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.navigate('#/tonight') }),
     prevExists
@@ -357,16 +388,19 @@ function drinkRow(ctx, id, dates, drink, index, draw) {
     }));
 }
 
-// M5 adds routine assignment; until then night.experimentId is always null
-// and this row stays omitted, exactly as it will for a night with no
-// assigned routine once assignment exists.
-function routineRow(doc, night) {
-  const id = night?.experimentId ?? null;
-  const exp = id ? doc.experiments.find(e => e.id === id) : null;
+// The routine this evening belongs to (R01), and no advice about it. A night
+// recorded before its routine started carries no tag, so the dates are asked
+// for as well — the answer is the same one night creation used.
+function routineRow(doc, night, nightId) {
+  const tagged = night?.experimentId ?? null;
+  const exp = (tagged ? doc.experiments.find(e => e.id === tagged) : null)
+    ?? activeExperiment(doc, night?.id ?? nightId ?? null);
   if (!exp) return null;
   return linkRow({
     label: exp.name,
-    sub: exp.to ? `${exp.from} – ${exp.to}` : `since ${exp.from}`,
+    sub: exp.to
+      ? `${dayLabelFor(exp.from)} – ${dayLabelFor(exp.to)}`
+      : `since ${dayLabelFor(exp.from)}`,
     href: `#/routines/${exp.id}`,
     k: 'routine',
   });
