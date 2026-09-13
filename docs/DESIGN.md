@@ -137,7 +137,7 @@ get back to unknown.
 
 | type | meaning | optional detail |
 |---|---|---|
-| `wet` | bed is wet | `amount`: damp \| wet \| soaked · `noticed`: self \| parent · `changed`: [sheets, pajamas] |
+| `wet` | bed is wet | `amount`: damp \| wet \| soaked · `noticed`: self \| parent · `changed`: [sheets, pyjamas] |
 | `selfToilet` | **she woke and asked / went to pee** | `output`: none \| some \| lots · `madeIt`: true \| false |
 | `lift` | I carried her to the potty | `output`: none \| some \| lots · `woke`: true \| false |
 | `drink` | she asked for water | `size`: sip \| cup |

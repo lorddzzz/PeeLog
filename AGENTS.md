@@ -146,5 +146,6 @@ Keep a short progress note current: state now, what's verified, next gap.
 
 ```bash
 python3 -m http.server 8000     # serve locally (required for service worker)
-python3 tools/make_icons.py     # regenerate icons/ after editing the generator
+python3 tools/make_sprite.py    # rebuild index.html's inline icon sprite from assets/icons.svg
+python3 tools/make_art.py       # regenerate assets/art/ JPEGs from the illustration originals (macOS only, needs sips)
 ```

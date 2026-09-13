@@ -1,17 +1,38 @@
 /* PeeLog — dark-first. Everything is tuned for a dark bedroom at 3am:
-   near-black ground for OLED, desaturated accents, no white surfaces,
-   no animation that draws the eye, large thumb-zone targets. */
+   near-black ground, desaturated accents, no white surfaces, no animation
+   that draws the eye, large thumb-zone targets. Tokens below are adopted
+   verbatim from docs/ux/tokens.json ("Quiet company") — the art in
+   assets/art/ bakes in this exact background colour, so it cannot drift. */
 
 :root {
-  --bg:      #07090D;
-  --surface: #12161F;
-  --line:    #1E2532;
-  --text:    #E6EAF2;
-  --dim:     #7A8699;
-  --accent:  #5B9BE0;
-  --wet:     #C2724A;   /* muted terracotta — findable, not alarming */
+  color-scheme: dark;
 
-  --tap: 0.10s ease-out;
+  --bg:          #10151E;
+  --surface:     #1B2432;
+  --raised:      #252F40;
+  --border:      #687B97;
+  --text:        #E0DFD8;
+  --secondary:   #A4ADBB;
+  --accent:      #D6C9AC;
+  --wet:         #D0A893;
+  --wet-surface: #2B2424;
+  --saved:       #ADBFAD;
+  --error:       #E7AE9D;
+  --focus:       #D6C9AC;
+
+  --font-heading: Georgia, serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --size-title:     36px;
+  --size-action:    18px;
+  --size-body:      16px;
+  --size-secondary: 14px;
+  --size-meta:      12px;
+
+  --radius-action: 20px;
+  --radius-field:  12px;
+  --radius-sheet:  24px;
+
+  --tap: 0.12s ease-out;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bot: env(safe-area-inset-bottom, 0px);
 }
@@ -23,7 +44,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font: var(--size-body)/1.45 var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -38,15 +59,38 @@ body {
   padding-top: var(--safe-top);
 }
 
+a { color: inherit; }
+button, input, select, textarea { font: inherit; }
+button, a, select { -webkit-tap-highlight-color: transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+/* Icons: same-document <use> only — Safari has never resolved <use
+   href="file.svg#id">, so the sprite is inlined by tools/make_sprite.py. */
+.ico {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
 .banner {
   background: #2A2416;
   color: #D8C28A;
-  font-size: 13px;
+  font-size: var(--size-secondary);
   text-align: center;
   padding: 7px 12px;
   border-bottom: 1px solid #3A3320;
+  margin: 0;
 }
-.banner b { color: #F0D9A0; }
+.banner[hidden] { display: none; }
 
 .top {
   display: flex;
@@ -55,107 +99,301 @@ body {
   padding: 10px 16px 6px;
 }
 .top h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
-.ver { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ver { font-size: var(--size-meta); color: var(--secondary); font-variant-numeric: tabular-nums; }
 
 main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.view { display: flex; flex-direction: column; height: 100%; padding: 0 12px 12px; }
+.view { padding: 0 16px 16px; }
 .view[hidden] { display: none; }
 
-.summary { color: var(--dim); font-size: 14px; margin: 4px 4px 10px; }
-.stub    { color: var(--dim); font-size: 14px; margin: 4px 4px 18px; }
-h2       { font-size: 15px; font-weight: 600; margin: 12px 4px 6px; }
+.summary { color: var(--secondary); font-size: var(--size-secondary); margin: 4px 4px 10px; }
+.stub    { color: var(--secondary); font-size: var(--size-secondary); margin: 4px 4px 18px; }
+h2       { font: 600 15px/1.3 var(--font-body); margin: 12px 4px 6px; color: var(--text); }
 
-/* ── Tonight: 2×2 grid plus one full-width wet button ────────────────── */
-.grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1.15fr;
-  gap: 10px;
-  min-height: 340px;
+/* ── Tonight header: art vignette + serif title ──────────────────────── */
+.title-art {
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  padding: 14px 4px 0;
+}
+.title-art img {
+  position: absolute;
+  width: 200px;
+  height: 133px;
+  object-fit: cover;
+  right: -20px;
+  top: -10px;
+  mix-blend-mode: lighten;
+  pointer-events: none;
+}
+.title-art > div { position: relative; z-index: 1; max-width: 65%; }
+.title-art h2 {
+  font: 400 var(--size-title)/1.15 var(--font-heading);
+  letter-spacing: -0.5px;
+  margin: 0;
 }
 
-.ev {
-  appearance: none;
+.overline {
+  font-size: var(--size-meta);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--secondary);
+  margin: 0 0 8px;
+}
+.lead {
+  font-size: var(--size-secondary);
+  color: var(--secondary);
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+
+/* Decorative only — hides without moving any control. */
+body.no-art .art,
+body.no-art .title-art img { display: none; }
+
+/* ── Tonight: 2-column action grid, wet bed spans full width ─────────── */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  border-radius: var(--radius-action);
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 16px;
+  border: 1px solid var(--border);
   color: var(--text);
   font: inherit;
-  font-size: 16px;
+  font-size: var(--size-action);
   font-weight: 500;
-  line-height: 1.25;
-  padding: 8px;
+  line-height: 1.3;
+  text-align: left;
+  padding: 16px;
+  appearance: none;
   cursor: pointer;
   transition: background var(--tap), transform var(--tap);
 }
+.action .ico { color: #B1BDD1; }
+
 /* Wet bed is the most likely 3am tap: widest, lowest, hardest to miss. */
-.ev.wet {
+.action.wet {
   grid-column: 1 / -1;
-  background: #241A14;
-  border-color: #3D2A1E;
+  min-height: 86px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  background: var(--wet-surface);
+  border-color: #725B51;
   color: var(--wet);
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
 }
-.ev .ico { display: block; font-size: 30px; margin-bottom: 4px; }
 
 /* iOS Safari has no Vibration API, so tap confirmation must be visual. */
-.ev:active, .ev.hit { background: #1E2636; transform: scale(0.97); }
-.ev.wet:active, .ev.wet.hit { background: #3A2618; }
+.action:active, .action.hit { background: var(--raised); transform: scale(0.97); }
+.action.wet:active, .action.wet.hit { background: #3A2618; }
 
-.last {
+@media (prefers-reduced-motion: reduce) {
+  .action { transition: none; }
+  .action:active, .action.hit,
+  .action.wet:active, .action.wet.hit { transform: none; }
+}
+
+/* ── Saved strip (last logged event + undo) ──────────────────────────── */
+.saved {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-top: 10px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   min-height: 44px;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  font-size: 14px;
-  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  font-size: var(--size-secondary);
+  color: var(--saved);
 }
 #last-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#undo {
+.saved button {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
   appearance: none;
   background: none;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--accent);
   font: inherit;
-  font-size: 14px;
-  padding: 5px 12px;
+  font-size: var(--size-secondary);
+  padding: 6px 12px;
   cursor: pointer;
+}
+.saved button[hidden] { display: none; }
+
+/* ── Generic components (for screens still to come) ──────────────────── */
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-body);
+  text-align: center;
+  text-decoration: none;
+  padding: 11px 16px;
+  margin: 12px 0;
+  appearance: none;
+  cursor: pointer;
+}
+.button.primary { background: var(--accent); color: #181B21; border-color: var(--accent); font-weight: 500; }
+.button.quiet { background: transparent; border-color: transparent; color: var(--secondary); }
+.button.danger { background: #302220; color: var(--error); border-color: #946A5D; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 9px 0 16px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-secondary);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.chip.selected { background: var(--raised); border-color: var(--accent); }
+
+.field { margin: 16px 0; }
+.field-label { display: block; font-size: var(--size-secondary); margin-bottom: 8px; }
+.field-help { font-size: var(--size-meta); color: var(--secondary); margin: 7px 0 0; }
+
+.notice {
+  background: var(--raised);
+  border-left: 2px solid var(--border);
+  border-radius: 0 var(--radius-field) var(--radius-field) 0;
+  padding: 12px 14px;
+  font-size: var(--size-secondary);
+  line-height: 1.6;
+  margin: 16px 0;
+}
+.notice strong { font-weight: 500; color: var(--text); }
+.notice.warm { background: #2B2620; border-color: var(--wet); }
+.notice.error { background: #302220; border-color: var(--error); }
+
+.linkrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 54px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--size-secondary);
+  text-decoration: none;
+}
+.linkrow .ico { width: 17px; height: 17px; color: var(--secondary); }
+.linkrow small { display: block; color: var(--secondary); font-size: var(--size-meta); margin-top: 4px; }
+
+.sheet {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sheet);
+  background: var(--raised);
+  margin: 16px 0;
+}
+
+.subnav {
+  display: flex;
+  gap: 5px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin: 0 0 20px;
+}
+.subnav a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border-radius: var(--radius-field);
+  color: var(--secondary);
+  font-size: var(--size-secondary);
+  padding: 8px 12px;
+  text-decoration: none;
+}
+.subnav .selected { background: var(--raised); color: var(--accent); }
+
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--size-secondary);
+  text-decoration: none;
+}
+.history-row small { display: block; font-size: var(--size-meta); color: var(--secondary); margin-top: 5px; }
+
+.outcome { display: flex; align-items: center; gap: 5px; font-size: var(--size-meta); color: var(--text); white-space: nowrap; }
+.outcome .ico { width: 15px; height: 15px; }
+.outcome.wet { color: var(--wet); }
+.outcome.open { color: var(--secondary); }
+
+/* Native pickers: color-scheme:dark handles the calendar/clock chrome; the
+   field itself still needs the app's own surface and a 16px font so iOS
+   doesn't zoom in on focus. */
+input[type="time"],
+input[type="date"],
+input[type="number"],
+textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font: 16px/1.4 var(--font-body);
+  min-height: 48px;
+  padding: 10px 12px;
 }
 
 /* ── Install check ───────────────────────────────────────────────────── */
-.checks { margin: 0; font-size: 14px; }
+.checks { margin: 0; font-size: var(--size-secondary); }
 .checks div {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 9px 4px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border);
 }
-.checks dt { flex: none; width: 20px; font-size: 15px; }
+.checks dt { flex: none; width: 24px; font-size: 15px; margin: 0; }
 .checks dd { margin: 0; flex: 1; }
 .checks .k { display: block; }
-.checks .v { display: block; color: var(--dim); font-size: 13px; margin-top: 1px; }
+.checks .v { display: block; color: var(--secondary); font-size: var(--size-meta); margin-top: 1px; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 4px; }
 .actions button {
   appearance: none;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--accent);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--size-secondary);
   padding: 9px 14px;
   cursor: pointer;
 }
@@ -164,19 +402,26 @@ h2       { font-size: 15px; font-weight: 600; margin: 12px 4px 6px; }
 .tabs {
   flex: none;
   display: flex;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border);
   background: var(--bg);
   padding-bottom: var(--safe-bot);
 }
 .tabs button {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 56px;
   appearance: none;
   background: none;
   border: 0;
-  color: var(--dim);
+  color: var(--secondary);
   font: inherit;
-  font-size: 13px;
-  padding: 12px 4px;
+  font-size: var(--size-meta);
+  padding: 10px 4px 8px;
   cursor: pointer;
 }
 .tabs button.on { color: var(--accent); }
+.tabs .ico { width: 21px; height: 21px; }

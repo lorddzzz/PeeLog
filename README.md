@@ -37,12 +37,25 @@ Safari → Share → **Add to Home Screen**, then launch from the icon. Open the
 **Check** tab, confirm the rows, then turn on Airplane Mode and relaunch from
 the icon. If the app opens with no network, the foundation works.
 
-## Icons
+## Icons & art
 
-Regenerate after editing `tools/make_icons.py` (pure stdlib, no dependencies):
+Icons live as individual SVGs and a combined sprite in `assets/icons/` and
+`assets/icons.svg`. Safari has never supported cross-document `<use
+href="file.svg#id">`, so `index.html` also carries the sprite inlined as a
+hidden `<svg>` between `<!-- sprite:start -->` / `<!-- sprite:end -->`
+markers; icons are used in markup as `<svg class="ico"><use
+href="#name"/></svg>`. Regenerate that block after editing `assets/icons.svg`:
 
 ```bash
-python3 tools/make_icons.py
+python3 tools/make_sprite.py
+```
+
+The illustration originals in `docs/ux/assets/illustrations/` are 1.3–1.5 MB
+PNGs — too heavy to precache. `tools/make_art.py` (macOS only, shells out to
+`sips`) downsamples them to 560px-wide JPEGs in `assets/art/`:
+
+```bash
+python3 tools/make_art.py
 ```
 
 Bump `CACHE` in `sw.js` whenever a precached file changes, or phones will keep
