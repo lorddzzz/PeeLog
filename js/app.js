@@ -1,5 +1,5 @@
 // PeeLog M0 — app shell. No persistence yet; see docs/DESIGN.md for the plan.
-import { runChecks, renderChecks } from './selftest.js';
+import { runChecks, renderChecks, runSelfTests } from './selftest.js';
 
 export const VERSION = '0.1.0-m0';
 
@@ -73,7 +73,7 @@ undoBtn.addEventListener('click', () => { mock.pop(); renderLast(); });
 
 /* ── Install check ──────────────────────────────────────────────────── */
 async function refreshChecks() {
-  renderChecks(document.getElementById('checks'), await runChecks(VERSION));
+  renderChecks(document.getElementById('checks'), [...await runChecks(VERSION), ...runSelfTests()]);
 }
 
 document.getElementById('recheck').addEventListener('click', refreshChecks);
