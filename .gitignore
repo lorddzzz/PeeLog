@@ -1,0 +1,6 @@
+.DS_Store
+*.log
+
+# Never commit logged data or its exports — the repo is public, the data is not.
+/exports/
+*.peelog.json

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PeeLog</title>
+<meta name="description" content="Night-wetting tracker.">
+
+<meta name="theme-color" content="#07090D">
+<meta name="color-scheme" content="dark">
+<link rel="manifest" href="manifest.webmanifest">
+
+<!-- Still required by older iOS; modern iOS reads display:standalone from the manifest. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PeeLog">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="banner" id="banner">M0 — shell only. Taps are <b>not</b> recorded yet.</div>
+
+<header class="top">
+  <h1>PeeLog</h1>
+  <span class="ver" id="ver">–</span>
+</header>
+
+<main>
+  <!-- ───────────────────────── Tonight ───────────────────────── -->
+  <section class="view" id="view-tonight" data-view="tonight">
+    <p class="summary" id="summary">No night open</p>
+
+    <div class="grid">
+      <button class="ev" data-ev="selfToilet"><span class="ico">🚽</span>She asked<br>to pee</button>
+      <button class="ev" data-ev="lift"><span class="ico">🌙</span>I lifted<br>her</button>
+      <button class="ev" data-ev="drink"><span class="ico">🥤</span>Water</button>
+      <button class="ev" data-ev="wake"><span class="ico">😢</span>Woke up</button>
+      <button class="ev wet" data-ev="wet"><span class="ico">💧</span>WET BED</button>
+    </div>
+
+    <div class="last" id="last">
+      <span id="last-text">Nothing logged yet</span>
+      <button id="undo" hidden>↩ undo</button>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── History ───────────────────────── -->
+  <section class="view" id="view-history" data-view="history" hidden>
+    <p class="stub">History, editing and charts arrive in M3–M4.</p>
+  </section>
+
+  <!-- ───────────────────────── Check ───────────────────────── -->
+  <section class="view" id="view-check" data-view="check" hidden>
+    <h2>Install check</h2>
+    <p class="stub">Everything M1 depends on. Check this on the phone, then turn
+       on Airplane Mode and reopen the app from the home screen.</p>
+    <dl class="checks" id="checks"></dl>
+    <div class="actions">
+      <button id="persist">Request persistent storage</button>
+      <button id="recheck">Re-run checks</button>
+      <button id="update">Check for update</button>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-tab="tonight" class="on">Tonight</button>
+  <button data-tab="history">History</button>
+  <button data-tab="check">Check</button>
+</nav>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
