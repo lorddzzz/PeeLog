@@ -236,8 +236,11 @@ export const EVENT_TYPES = {
       {
         key: 'noticed', label: 'Who noticed', kind: 'single',
         options: [
-          { value: 'self', label: 'She woke' },
-          { value: 'parent', label: 'I found it' },
+          // `short` because the chip is addressed to the parent ("I found
+          // it") and a summary is not — "i found it" mid-sentence reads as a
+          // typo in a history row.
+          { value: 'self', label: 'She woke', short: 'she woke' },
+          { value: 'parent', label: 'I found it', short: 'parent noticed' },
         ],
       },
       {
@@ -481,6 +484,18 @@ export function eventSummary(ev) {
   return def.label;
 }
 
+// 'wet · parent noticed · sheets, pyjamas' — every answered detail, for a
+// night's event rows. Empty when nothing was answered; the caller decides
+// what unknown should read as.
+export function eventDetailSummary(ev) {
+  const def = EVENT_TYPES[ev?.type];
+  if (!def) return '';
+  return def.fields
+    .filter(f => answered(ev[f.key]))
+    .map(f => fieldText(f, ev[f.key]))
+    .join(' · ');
+}
+
 // 'Asleep 20:45 · 1 drink' — Tonight's compact stand-in for the Evening
 // details link before there is anything to summarise.
 export function eveningSummaryFor(evening) {
@@ -617,6 +632,143 @@ export function suggestedEveningTimes(doc, nightId) {
     dinnerAt: remap(prev?.evening?.dinnerAt ?? null),
     lightsOutAt: remap(prev?.evening?.lightsOutAt ?? null),
     asleepAt: remap(prev?.evening?.asleepAt ?? null),
+  };
+}
+
+/* ── History (H01–H06) ──────────────────────────────────────────────────
+   Everything the history list, the night detail and the event edit draft
+   need over the document. Pure, so the awkward parts — the boundary move,
+   the calendar gaps, a deleted night coming back — are asserted on the
+   Check tab rather than by clicking. */
+
+// The four states a row may be in. A wet event on an unreviewed night is
+// "wet recorded, review due" — it is not a confirmed wet outcome, and the
+// metrics denominators (UX-HANDOFF P01) depend on telling those apart.
+export function nightStatus(night) {
+  const outcome = night?.morning?.outcome ?? null;
+  if (outcome === 'dry' || outcome === 'wet') return outcome;
+  return (night?.events ?? []).some(e => e.type === 'wet') ? 'wet-review-due' : 'review-due';
+}
+
+// The first wet entry's instant, or null. Events are kept in `t` order, so
+// the first one found is the earliest.
+export function firstWetTime(night) {
+  return (night?.events ?? []).find(e => e.type === 'wet')?.t ?? null;
+}
+
+// Every type counted, including the zeroes — a caller listing "1 lift" must
+// not have to guess whether a missing key means none or means unknown.
+export function eventCounts(night) {
+  const counts = Object.fromEntries(EVENT_ORDER.map(type => [type, 0]));
+  for (const ev of night?.events ?? []) {
+    if (counts[ev.type] !== undefined) counts[ev.type]++;
+  }
+  return counts;
+}
+
+const MONTH_RE = /^(\d{4})-(\d{2})$/;
+
+export const monthOf = dateStr => (isDateStr(dateStr) ? dateStr.slice(0, 7) : null);
+
+export function shiftMonth(month, delta) {
+  const m = typeof month === 'string' ? MONTH_RE.exec(month) : null;
+  if (!m) return null;
+  const total = +m[1] * 12 + (+m[2] - 1) + delta;
+  return `${pad(Math.floor(total / 12), 4)}-${pad((total % 12) + 1)}`;
+}
+
+// 'September 2026'
+export function monthLabelFor(month) {
+  const m = typeof month === 'string' ? MONTH_RE.exec(month) : null;
+  return m && +m[2] >= 1 && +m[2] <= 12 ? `${MONTHS[+m[2] - 1]} ${m[1]}` : '';
+}
+
+// One row per date in the month, newest first. A date with no record inside
+// the month reads "No record", never Dry (S01) — but only up to the night
+// before tonight: tonight's own night is still being lived, and a night that
+// has not happened yet is not a gap.
+export function monthNightsWithGaps(doc, month, today = new Date()) {
+  const m = typeof month === 'string' ? MONTH_RE.exec(month) : null;
+  if (!m || +m[2] < 1 || +m[2] > 12) return [];
+  const [y, mo] = [+m[1], +m[2]];
+  const days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const lastGap = prevNightId(nightIdFor(today));
+  const rows = [];
+  for (let d = days; d >= 1; d--) {
+    const id = isoDate(y, mo, d);
+    const night = findNight(doc, id);
+    if (night) rows.push({ id, night, kind: 'night', status: nightStatus(night) });
+    else if (id <= lastGap) rows.push({ id, night: null, kind: 'no-record', status: 'no-record' });
+  }
+  return rows;
+}
+
+// An edited timestamp moves the event, and may move it to another night.
+// Shared by Tonight's detail panel and History's edit draft so one rule
+// decides where a moved entry lands — and what happens to the night it left.
+export function moveEventTo(draft, eventId, newT) {
+  const from = nightForEvent(draft, eventId);
+  if (!from) return null;
+  const toId = nightIdForIso(newT) ?? from.id;
+  const entry = removeEvent(from, eventId);
+  entry.t = newT;
+  insertEvent(toId === from.id ? from : ensureNight(draft, toId), entry);
+  // A night that held nothing but this event is not a night that happened —
+  // left behind, it would ask every evening to review a blank record.
+  if (toId !== from.id && isUntouchedNight(from)) {
+    draft.nights.splice(draft.nights.indexOf(from), 1);
+    if (draft.activeNightId === from.id) draft.activeNightId = null;
+  }
+  return { fromId: from.id, toId };
+}
+
+// A corrected type keeps only what is still true of the entry: when it
+// happened, and which entry it is. No detail field survives — "amount" on a
+// wet bed and "amount" on a drink are different questions that happen to
+// share a name, so carrying one across would invent an answer.
+export function retypeEvent(ev, newType) {
+  const next = newEvent(newType, ev.t);
+  next.id = ev.id;
+  return next;
+}
+
+// Returns the removed night (with its index, so an Undo can put it back
+// exactly where it was) or null when there was nothing to remove.
+export function deleteNight(draft, id) {
+  const index = draft.nights.findIndex(n => n.id === id);
+  if (index === -1) return null;
+  // Nothing may stay open on a night that no longer exists — and an Undo has
+  // to know it was open, or restoring it would quietly close it.
+  const wasActive = draft.activeNightId === id;
+  const [night] = draft.nights.splice(index, 1);
+  if (wasActive) draft.activeNightId = null;
+  return { night, index, wasActive };
+}
+
+// Puts a deleted night back, keeping ascending order. A night recorded again
+// in the meantime is left alone: replacing it would drop whatever was logged
+// into it after the delete.
+export function restoreNight(draft, night, wasActive = false) {
+  if (!night || findNight(draft, night.id)) return null;
+  const copy = clone(night);
+  const at = draft.nights.findIndex(n => n.id > copy.id);
+  if (at === -1) draft.nights.push(copy);
+  else draft.nights.splice(at, 0, copy);
+  if (wasActive) draft.activeNightId = copy.id;
+  return copy;
+}
+
+// Backfill (H05/H06): the evening date decides everything, so it is checked
+// before anything is written. An existing date opens its record rather than
+// creating a second one for the same night.
+export function backfillTarget(doc, dateStr, now = new Date()) {
+  if (!isDateStr(dateStr)) return { id: null, valid: false, exists: false, future: false };
+  return {
+    id: dateStr,
+    valid: true,
+    exists: !!findNight(doc, dateStr),
+    // Tonight's own night is the latest evening that can be recorded.
+    future: dateStr > nightIdFor(now),
   };
 }
 

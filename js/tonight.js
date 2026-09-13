@@ -5,7 +5,7 @@
 import {
   EVENT_ORDER, EVENT_TYPES, activeNightFor, dayIsUnanswered, dayLabelFor,
   ensureNight, eveningSummaryFor, findEvent, findNight, insertEvent, isReviewed,
-  isUntouchedNight, latestEvent, newEvent, nightForEvent, nightIdFor,
+  latestEvent, moveEventTo, newEvent, nightForEvent, nightIdFor,
   nightIdForIso, openNight, pendingReviewFor, prevNightId, removeEvent,
   stampLabelFor, timeLabelFor, toIso, weekdayNameFor,
 } from './model.js';
@@ -20,7 +20,9 @@ import {
    the column headings for history rows and exports; at 3am the question form
    reads better, so the screen keeps its own wording. */
 
-const FIELD_COPY = {
+// Exported: History's edit draft (H04) asks the same questions of the same
+// fields, and two copies of this table would drift apart.
+export const FIELD_COPY = {
   'wet.amount': 'How much?',
   'wet.noticed': 'Who noticed?',
   'wet.changed': 'What changed?',
@@ -172,19 +174,9 @@ function moveEvent(ctx, event, t, draw) {
   const to = nightIdForIso(t);
   const moved = to !== nightIdForIso(event.t);
   const reviewed = isReviewed(findNight(ctx.store.get(), to));
-  const result = ctx.store.update(draft => {
-    const from = nightForEvent(draft, event.id);
-    if (!from) return;
-    const entry = removeEvent(from, event.id);
-    entry.t = t;
-    insertEvent(to === from.id ? from : ensureNight(draft, to), entry);
-    // A night that held nothing but this event is not a night that happened —
-    // left behind, it would ask every evening to review a blank record.
-    if (to !== from.id && isUntouchedNight(from)) {
-      draft.nights.splice(draft.nights.indexOf(from), 1);
-      if (draft.activeNightId === from.id) draft.activeNightId = null;
-    }
-  });
+  // Where a moved entry lands, and what becomes of the night it left, is one
+  // rule in model.js — History's edit draft moves events too (H04).
+  const result = ctx.store.update(draft => { moveEventTo(draft, event.id, t); });
   if (!result.ok) {
     state.panelError = NOT_SAVED;
     draw();
@@ -243,7 +235,7 @@ function tonight(ctx, draw) {
       : savedStrip({ text: 'Nothing logged yet', detail: 'Ready whenever you need it.' }),
     state.undoError ? notice({ kind: 'error', title: state.undoError, text: 'The entry is still recorded. Try Undo again.' }) : null,
     state.moveNote ? notice({ text: state.moveNote }) : null,
-    reviewNotice(doc, active.id),
+    reviewNotice(doc, state.reviewTouched, active.id),
     open ? detail(ctx, open, draw, { onDone: () => { state.openEventId = null; state.editingTime = false; draw(); } }) : null,
     linkRow({
       label: 'Evening details',
@@ -295,11 +287,11 @@ function staleNotice(nightId) {
   });
 }
 
-// An entry landed under a night whose review is already recorded — by a tap or
-// by a move. A night other than the one on screen is named, or the warning
-// reads as if it were about tonight.
-function reviewNotice(doc, shownId) {
-  const id = state.reviewTouched;
+// An entry landed under a night whose review is already recorded — by a tap, a
+// move, an edit or a delete. A night other than the one on screen is named, or
+// the warning reads as if it were about tonight. Exported because History's
+// event editing (H04) changes the same nights and owes the same warning.
+export function reviewNotice(doc, id, shownId) {
   const night = id ? findNight(doc, id) : null;
   if (!night || !isReviewed(night)) return null;
   return notice({
@@ -369,7 +361,7 @@ function eventScreen(ctx, draw) {
     // The time can be edited here too, so the move and re-review notices
     // belong here as well — the same feedback Tonight gives.
     state.moveNote ? notice({ text: state.moveNote }) : null,
-    reviewNotice(doc, night?.id ?? null),
+    reviewNotice(doc, state.reviewTouched, night?.id ?? null),
     detail(ctx, event, draw, {
       onDone: () => ctx.navigate('#/tonight'),
       heading: false,

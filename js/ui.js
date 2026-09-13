@@ -3,7 +3,9 @@
 // follow the design atlas (docs/ux/atlas.css) so app.css stays the one place
 // the visual system lives.
 
-import { composeIso, dateForNightTime, parseIso, stepValue, timeLabelFor } from './model.js';
+import {
+  composeIso, dateForNightTime, isDateStr, parseIso, stepValue, timeLabelFor,
+} from './model.js';
 
 /* ── Element building ───────────────────────────────────────────────────
    `on:click` registers a listener; `k` becomes data-k, which is how a screen
@@ -191,6 +193,27 @@ export function timeField({ label, value, dates, onCommit, suggested, help, k = 
     h('div', { class: 'field-row' }, input),
     error,
     hint,
+    help ? h('p', { class: 'field-help', text: help }) : null);
+}
+
+// A date on its own, for the one question that is a date and not an instant:
+// which evening a backfilled night began on (H05). Commits the date string,
+// never an ISO instant — a night id is a label, not a moment.
+export function dateField({ label, value, max, onCommit, help, k = 'date' }) {
+  const input = h('input', { type: 'date', k, 'aria-label': label, value: value ?? '', max });
+  const error = h('p', { class: 'field-error', role: 'alert' });
+
+  input.addEventListener('change', () => {
+    const next = input.value;
+    if (next && !isDateStr(next)) { error.textContent = 'Enter a real date.'; return; }
+    error.textContent = '';
+    onCommit(next || null);
+  });
+
+  return h('div', { class: 'field' },
+    h('span', { class: 'field-label', text: label }),
+    h('div', { class: 'field-row' }, input),
+    error,
     help ? h('p', { class: 'field-help', text: help }) : null);
 }
 

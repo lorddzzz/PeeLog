@@ -158,6 +158,17 @@ h3 { font: 500 17px/1.3 var(--font-body); margin: 0 0 10px; color: var(--text); 
   margin: 0 0 10px;
 }
 
+/* A full-width vignette, for the screens that lead with art rather than
+   tucking it behind a title (H02's empty history, W01). */
+.art {
+  display: block;
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  mix-blend-mode: lighten;
+  margin: 0 0 16px;
+}
+
 /* Decorative only — hides without moving any control. */
 body.no-art .art,
 body.no-art .title-art img { display: none; }
@@ -454,6 +465,8 @@ body.no-art .title-art img { display: none; }
   background: var(--raised);
   margin: 16px 0;
 }
+/* A row that ends its sheet separates nothing below it. */
+.sheet .linkrow:last-child { border-bottom: 0; padding-bottom: 0; }
 
 .subnav {
   display: flex;
@@ -474,23 +487,58 @@ body.no-art .title-art img { display: none; }
 }
 .subnav .selected { background: var(--raised); color: var(--accent); }
 
+/* ── History (H01) ───────────────────────────────────────────────────── */
+
+.month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+.month strong { font-weight: 500; font-size: var(--size-body); }
+.month .chip { min-width: 56px; }
+/* Forward stops at the month tonight belongs to; nothing beyond it exists. */
+.month .chip[disabled] { opacity: 0.4; }
+
+/* Both an <a> (a recorded night) and a <button> (a gap, which offers to
+   backfill its own date) wear this, so the button defaults are reset. */
 .history-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
   padding: 16px 0;
+  appearance: none;
+  background: none;
+  border: 0;
   border-bottom: 1px solid var(--border);
   color: var(--text);
+  font: inherit;
   font-size: var(--size-secondary);
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
 }
+/* A date with no record is quieter than a recorded one — it is an absence,
+   not an outcome. */
+.history-row.gap { color: var(--secondary); }
 .history-row small { display: block; font-size: var(--size-meta); color: var(--secondary); margin-top: 5px; }
 
 .outcome { display: flex; align-items: center; gap: 5px; font-size: var(--size-meta); color: var(--text); white-space: nowrap; }
 .outcome .ico { width: 15px; height: 15px; }
 .outcome.wet { color: var(--wet); }
 .outcome.open { color: var(--secondary); }
+/* "Wet recorded · review due" is the longest of these and is never truncated
+   (handoff rule 10): at phone width it wraps instead. */
+.outcome {
+  flex: none;
+  max-width: 45%;
+  white-space: normal;
+  text-align: right;
+  justify-content: flex-end;
+}
 
 /* Native pickers: color-scheme:dark handles the calendar/clock chrome; the
    field itself still needs the app's own surface and a 16px font so iOS

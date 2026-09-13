@@ -4,7 +4,7 @@
 
 import {
   DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, addDrink, dayDateFor, dayLabelFor,
-  ensureNight, findDrink, findNight, newDrink, openNight, outcomeConflict,
+  ensureNight, findDrink, findNight, newDrink, nightIdFor, openNight, outcomeConflict,
   prevNightId, removeDrink, setNoDrinks, suggestedEveningTimes, timeLabelFor,
   toggleSleepSign, weekdayNameFor,
 } from './model.js';
@@ -230,10 +230,10 @@ function confirmation(ctx, id) {
 }
 
 /* ── Evening (R01) ──────────────────────────────────────────────────────
-   Reached only from Tonight at M2, always the current/next night — so every
-   successful write can safely call openNight; a mere visit never writes,
-   so viewing this card alone never moves activeNightId (AGENTS.md behaviour:
-   "Opening the card ... calls openNight on the first write, not on view"). */
+   A write opens the night only when it is the night the clock is in now:
+   editing a past evening from History must not drag activeNightId backwards,
+   or Tonight would nag about a night that is already done. A mere visit never
+   writes, so viewing this card alone never moves activeNightId. */
 
 const eveningState = { nightId: null, note: '', failure: null };
 
@@ -244,7 +244,9 @@ function resetEvening(nightId) {
 }
 
 function writeEvening(ctx, fn, draw) {
-  writeDetail(ctx, draft => fn(openNight(draft, eveningState.nightId)), eveningState, draw);
+  const id = eveningState.nightId;
+  const open = id === nightIdFor(ctx.now()) ? openNight : ensureNight;
+  writeDetail(ctx, draft => fn(open(draft, id)), eveningState, draw);
 }
 
 export function renderEvening(el, ctx) {

@@ -7,6 +7,9 @@ import { exportFileName } from './model.js';
 import { linkRow, paint, title } from './ui.js';
 import { render as renderTonight, renderEvent } from './tonight.js';
 import { renderDay, renderEvening, renderMorning } from './cards.js';
+import {
+  render as renderHistory, renderBackfill, renderEventEdit, renderNight,
+} from './history.js';
 
 export const VERSION = '0.2.0-m1';
 
@@ -56,14 +59,17 @@ const applyArt = doc => document.body.classList.toggle('no-art', doc.settings?.a
 applyArt(store.get());
 store.subscribe(applyArt);
 
-/* ── Screens still to come ──────────────────────────────────────────────── */
+/* ── Screens still to come ──────────────────────────────────────────────
+   History's subnav names all three sections from M3, so both of the others
+   answer for themselves rather than bouncing to a dead hash. */
 
-function renderHistory(el) {
-  paint(el, [
-    title({ overline: 'History', name: 'Nights', lead: 'History arrives in M3.' }),
-    linkRow({ label: 'Back to Tonight', href: '#/tonight' }),
-  ]);
-}
+const soon = name => el => paint(el, [
+  title({ overline: 'History', name, lead: 'This part of History arrives in the next update.' }),
+  linkRow({ label: 'Back to Nights', href: '#/history' }),
+]);
+
+const renderPatterns = soon('Patterns');
+const renderRoutines = soon('Routines');
 
 /* ── Install check ──────────────────────────────────────────────────────
    Its markup stays in index.html and is moved in and out of the router's
@@ -125,6 +131,11 @@ const routes = [
   ['#/morning/:nightId', renderMorning],
   ['#/day/:nightId', renderDay],
   ['#/history', renderHistory],
+  ['#/history/add', renderBackfill],
+  ['#/night/:nightId', renderNight],
+  ['#/night/:nightId/event/:eventId', renderEventEdit],
+  ['#/patterns', renderPatterns],
+  ['#/routines', renderRoutines],
   ['#/check', renderCheck],
 ];
 
@@ -132,6 +143,7 @@ const routes = [
 const TAB_OF = {
   tonight: 'tonight', event: 'tonight', morning: 'tonight', evening: 'tonight',
   history: 'history', night: 'history', patterns: 'history', day: 'history',
+  routines: 'history',
   check: 'check',
 };
 

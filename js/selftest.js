@@ -4,13 +4,15 @@
 
 import { createStore, STORE_KEY } from './store.js';
 import {
-  activeNightFor, addDrink, clone, composeIso, dateForNightTime, dayDateFor,
-  dayIsUnanswered, emptyDoc, ensureNight, eveningSummaryFor, eventSummary,
-  exportFileName, findNight, insertEvent, isReviewed, isUntouchedNight,
-  latestEvent, migrate, newDrink, newEvent, newNight, nightIdFor, nightIdForIso,
-  openNight, outcomeConflict, parseIso, pendingReviewFor, prevNightId,
-  removeDrink, removeEvent, setNoDrinks, stepValue, suggestedEveningTimes,
-  toggleSleepSign, toIso, validateDoc,
+  activeNightFor, addDrink, backfillTarget, clone, composeIso, dateForNightTime,
+  dayDateFor, dayIsUnanswered, deleteNight, emptyDoc, ensureNight, eventCounts,
+  eveningSummaryFor, eventSummary, exportFileName, findNight, firstWetTime,
+  insertEvent, isReviewed, isUntouchedNight, latestEvent, migrate,
+  monthNightsWithGaps, moveEventTo, newDrink, newEvent, newNight, nightIdFor,
+  nightIdForIso, nightStatus, openNight, outcomeConflict, parseIso,
+  pendingReviewFor, prevNightId, removeDrink, removeEvent, restoreNight,
+  retypeEvent, setNoDrinks, stepValue, suggestedEveningTimes, toggleSleepSign,
+  toIso, validateDoc,
 } from './model.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -687,6 +689,160 @@ export function runSelfTests() {
     night.day.stool = 'none';
     assert(!dayIsUnanswered(night.day), 'an answered false-y value (stool: none) read as unanswered');
     return "'Asleep 20:45 · 1 drink' · stool:'none' counts as answered";
+  });
+
+  /* ── History (M3) ───────────────────────────────────────────────────── */
+
+  t('An edited time moves the entry across the 15:00 boundary', () => {
+    const doc = emptyDoc();
+    const night = ensureNight(doc, '2026-09-13');
+    const ev = newEvent('wet', '2026-09-14T02:00:00+02:00');
+    ev.id = 'e-move';
+    insertEvent(night, ev);
+
+    const moved = moveEventTo(doc, 'e-move', '2026-09-14T16:00:00+02:00');
+    assert(moved.fromId === '2026-09-13' && moved.toId === '2026-09-14', `moved ${JSON.stringify(moved)}`);
+    assert(!findNight(doc, '2026-09-13'), 'the night the entry left held nothing else and should be gone');
+    const to = findNight(doc, '2026-09-14');
+    assert(to && to.events.length === 1 && to.events[0].id === 'e-move', 'the entry did not land on the new night');
+    assert(to.events[0].t === '2026-09-14T16:00:00+02:00', 'the timestamp was not applied');
+
+    // The same move, from a night that has something else recorded on it.
+    const kept = emptyDoc();
+    const source = ensureNight(kept, '2026-09-13');
+    source.morning.outcome = 'dry';
+    const ev2 = newEvent('drink', '2026-09-14T02:00:00+02:00');
+    ev2.id = 'e-keep';
+    insertEvent(source, ev2);
+    moveEventTo(kept, 'e-keep', '2026-09-14T16:00:00+02:00');
+    assert(findNight(kept, '2026-09-13'), 'a night with a recorded outcome was deleted by a move');
+    assert(findNight(kept, '2026-09-13').events.length === 0, 'the entry was left behind');
+    assert(findNight(kept, '2026-09-14').events.length === 1, 'the entry did not arrive');
+    return '02:00 → 16:00 reassigns 09-13 → 09-14; an untouched source is removed, a recorded one kept';
+  });
+
+  t('A moved entry keeps its night in time order', () => {
+    const doc = emptyDoc();
+    const night = ensureNight(doc, '2026-09-13');
+    for (const [id, time] of [['e-a', '2026-09-13T23:00:00+02:00'], ['e-b', '2026-09-14T01:00:00+02:00'],
+      ['e-c', '2026-09-14T05:00:00+02:00']]) {
+      const ev = newEvent('drink', time);
+      ev.id = id;
+      insertEvent(night, ev);
+    }
+    moveEventTo(doc, 'e-a', '2026-09-14T03:00:00+02:00');
+    assert(findNight(doc, '2026-09-13').events.map(e => e.id).join(',') === 'e-b,e-a,e-c',
+      `out of order: ${findNight(doc, '2026-09-13').events.map(e => e.id)}`);
+    return 'A move inside the same night re-sorts by time';
+  });
+
+  t('Changing an entry\'s type clears only that entry', () => {
+    const wet = newEvent('wet', '2026-09-14T02:12:00+02:00');
+    wet.id = 'e-typed';
+    wet.amount = 'soaked';
+    wet.noticed = 'self';
+    wet.changed = ['sheets'];
+    const other = newEvent('wet', '2026-09-14T03:00:00+02:00');
+    other.amount = 'damp';
+
+    const next = retypeEvent(wet, 'drink');
+    assert(next.id === wet.id, 'the entry lost its identity');
+    assert(next.t === wet.t, 'the timestamp changed');
+    assert(next.type === 'drink', 'the type did not change');
+    assert(next.size === null, 'the new type started answered');
+    assert(!('amount' in next) && !('noticed' in next) && !('changed' in next), `old fields survived: ${Object.keys(next)}`);
+    assert(other.amount === 'damp', 'another entry was changed');
+    assert(wet.amount === 'soaked', 'the original was mutated instead of replaced');
+    return 'id and t kept · every wet-bed detail dropped · other entries untouched';
+  });
+
+  t('History rows fill calendar gaps without inventing nights', () => {
+    const doc = emptyDoc();
+    const dry = ensureNight(doc, '2026-09-11');
+    dry.morning.outcome = 'dry';
+    const wet = ensureNight(doc, '2026-09-13');
+    insertEvent(wet, newEvent('wet', '2026-09-14T02:12:00+02:00'));
+
+    // 15 September, 10:00 — tonight's night is the 14th and is still open.
+    const rows = monthNightsWithGaps(doc, '2026-09', new Date(2026, 8, 15, 10, 0));
+    const byId = Object.fromEntries(rows.map(r => [r.id, r]));
+    assert(rows[0].id === '2026-09-13', `newest first expected 09-13, got ${rows[0].id}`);
+    assert(!byId['2026-09-14'], "tonight's unfinished night was listed as a gap");
+    assert(!byId['2026-09-16'], 'a future date was listed');
+    assert(byId['2026-09-12'].kind === 'no-record' && byId['2026-09-12'].status === 'no-record',
+      'a date with no record did not read as one');
+    assert(byId['2026-09-11'].status === 'dry', 'a recorded dry night lost its outcome');
+    assert(byId['2026-09-13'].status === 'wet-review-due', 'a wet entry without a review read as a confirmed outcome');
+    assert(rows.filter(r => r.kind === 'night').length === 2, 'a gap was counted as a night');
+    return '09-13 … 09-01, no 09-14 (tonight) and no future dates; gaps read no-record';
+  });
+
+  t('Night status tells the four states apart', () => {
+    const blank = newNight('2026-09-13');
+    assert(nightStatus(blank) === 'review-due', 'an untouched night was not review due');
+    assert(firstWetTime(blank) === null, 'an empty night reported a wetting');
+
+    const wet = newNight('2026-09-13');
+    insertEvent(wet, newEvent('wet', '2026-09-14T02:12:00+02:00'));
+    insertEvent(wet, newEvent('lift', '2026-09-13T23:00:00+02:00'));
+    assert(nightStatus(wet) === 'wet-review-due', 'a wet entry without a review was not flagged for review');
+    assert(firstWetTime(wet) === '2026-09-14T02:12:00+02:00', `first wetting: ${firstWetTime(wet)}`);
+    assert(eventCounts(wet).wet === 1 && eventCounts(wet).lift === 1 && eventCounts(wet).drink === 0,
+      `counts: ${JSON.stringify(eventCounts(wet))}`);
+
+    wet.morning.outcome = 'wet';
+    assert(nightStatus(wet) === 'wet', 'a reviewed wet night was not wet');
+    const dry = newNight('2026-09-12');
+    dry.morning.outcome = 'dry';
+    assert(nightStatus(dry) === 'dry', 'a reviewed dry night was not dry');
+    return 'review-due · wet-review-due · wet · dry';
+  });
+
+  t('A deleted night comes back where it was', () => {
+    const doc = emptyDoc();
+    for (const id of ['2026-09-11', '2026-09-12', '2026-09-13']) ensureNight(doc, id);
+    const middle = findNight(doc, '2026-09-12');
+    insertEvent(middle, newEvent('wet', '2026-09-13T02:12:00+02:00'));
+    middle.morning.outcome = 'wet';
+    doc.activeNightId = '2026-09-12';
+    const before = JSON.stringify(doc);
+
+    const removed = deleteNight(doc, '2026-09-12');
+    assert(removed && removed.index === 1, `unexpected index: ${removed && removed.index}`);
+    assert(removed.wasActive === true, 'the open night was not reported as open');
+    assert(doc.activeNightId === null, 'activeNightId still points at a night that is gone');
+    assert(doc.nights.map(n => n.id).join(',') === '2026-09-11,2026-09-13', 'the wrong night was removed');
+
+    restoreNight(doc, removed.night, removed.wasActive);
+    assert(JSON.stringify(doc) === before, 'the restored document differs from the original');
+
+    // A night recorded again in the meantime is never overwritten by an Undo.
+    const again = deleteNight(doc, '2026-09-12');
+    ensureNight(doc, '2026-09-12');
+    assert(restoreNight(doc, again.night, again.wasActive) === null, 'restore overwrote a night recorded since');
+    assert(findNight(doc, '2026-09-12').events.length === 0, 'the night recorded since was replaced');
+    return 'Same index, same document · a night recorded since is left alone';
+  });
+
+  t('Backfilling a recorded date opens it instead of duplicating it', () => {
+    const doc = emptyDoc();
+    ensureNight(doc, '2026-09-09');
+    const now = new Date(2026, 8, 13, 20, 0); // tonight is 2026-09-13
+
+    const existing = backfillTarget(doc, '2026-09-09', now);
+    assert(existing.exists === true && existing.id === '2026-09-09', 'an existing date was not recognised');
+
+    const fresh = backfillTarget(doc, '2026-09-10', now);
+    assert(fresh.exists === false && fresh.valid === true, 'a free date was refused');
+
+    assert(backfillTarget(doc, '2026-09-13', now).future === false, 'tonight was treated as the future');
+    assert(backfillTarget(doc, '2026-09-14', now).future === true, "tomorrow's evening was accepted");
+    assert(backfillTarget(doc, 'not-a-date', now).valid === false, 'a nonsense date passed validation');
+
+    // Creating the same date twice can only ever produce one record.
+    ensureNight(doc, '2026-09-09');
+    assert(doc.nights.filter(n => n.id === '2026-09-09').length === 1, 'a duplicate night was created');
+    return 'Existing date → exists:true · tomorrow → future:true · ensureNight never duplicates';
   });
 
   t('The real document was not touched', () => {
