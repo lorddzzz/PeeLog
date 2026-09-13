@@ -6,7 +6,7 @@ import { createStore } from './store.js';
 import { exportFileName } from './model.js';
 import { linkRow, paint, title } from './ui.js';
 import { render as renderTonight, renderEvent } from './tonight.js';
-import { renderMorning } from './cards.js';
+import { renderDay, renderEvening, renderMorning } from './cards.js';
 
 export const VERSION = '0.2.0-m1';
 
@@ -121,7 +121,9 @@ checkSection.querySelector('#export-json').addEventListener('click', () => {
 const routes = [
   ['#/tonight', renderTonight],
   ['#/event/:id', renderEvent],
+  ['#/evening/:nightId', renderEvening],
   ['#/morning/:nightId', renderMorning],
+  ['#/day/:nightId', renderDay],
   ['#/history', renderHistory],
   ['#/check', renderCheck],
 ];
@@ -129,7 +131,7 @@ const routes = [
 // Which tab owns a route. Detail screens stay under the tab they came from.
 const TAB_OF = {
   tonight: 'tonight', event: 'tonight', morning: 'tonight', evening: 'tonight',
-  history: 'history', night: 'history', patterns: 'history',
+  history: 'history', night: 'history', patterns: 'history', day: 'history',
   check: 'check',
 };
 

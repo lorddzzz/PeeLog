@@ -393,6 +393,50 @@ export function newDrink(at = null, size = null) {
   return { id: rid('d-'), at, size };
 }
 
+/* ── Stepper ────────────────────────────────────────────────────────────
+   Shared by ui.js's stepper control and the self-test: the first tap on
+   either button answers `min`, so a count of zero is reachable without
+   passing through one, and a value never drops below `min`. */
+export function stepValue(value, min, delta) {
+  return value === null || value === undefined ? min : Math.max(min, value + delta);
+}
+
+/* ── Evening drinks ─────────────────────────────────────────────────────
+   noDrinks and a logged drink are facts that cannot both be true: adding a
+   drink means evening drinks happened, so a stale "confirmed none" beside it
+   would contradict the record. Confirming none, in turn, clears any rows
+   that were only half-filled placeholders. */
+export function addDrink(evening, drink) {
+  evening.drinks.push(drink);
+  evening.noDrinks = null;
+}
+
+export function setNoDrinks(evening, value) {
+  evening.noDrinks = value ? true : null;
+  if (value) evening.drinks = [];
+}
+
+export function findDrink(evening, id) {
+  return evening.drinks.find(d => d.id === id) ?? null;
+}
+
+export function removeDrink(evening, id) {
+  const at = evening.drinks.findIndex(d => d.id === id);
+  return at === -1 ? null : evening.drinks.splice(at, 1)[0];
+}
+
+/* ── Sleep signs ────────────────────────────────────────────────────────
+   'none' excludes every other sign and vice versa; removing the last sign
+   returns to unknown rather than an empty array, which the schema does not
+   treat as an answer (morning.sleepSigns is null | ['none'] | [...]). */
+export function toggleSleepSign(signs, value) {
+  const current = Array.isArray(signs) ? signs : [];
+  if (value === 'none') return current.includes('none') ? null : ['none'];
+  const rest = current.filter(v => v !== 'none' && v !== value);
+  const next = current.includes(value) ? rest : [...rest, value];
+  return next.length ? next : null;
+}
+
 /* ── Summaries ──────────────────────────────────────────────────────── */
 
 function fieldText(f, value) {
@@ -420,6 +464,24 @@ export function eventSummary(ev) {
     if (answered(ev[f.key])) return `${def.label} · ${fieldText(f, ev[f.key])}`;
   }
   return def.label;
+}
+
+// 'Asleep 20:45 · 1 drink' — Tonight's compact stand-in for the Evening
+// details link before there is anything to summarise.
+export function eveningSummaryFor(evening) {
+  if (!evening) return null;
+  const parts = [];
+  if (evening.asleepAt) parts.push(`Asleep ${timeLabelFor(evening.asleepAt)}`);
+  if (evening.noDrinks) parts.push('No drinks');
+  else if (evening.drinks.length) parts.push(`${evening.drinks.length} drink${evening.drinks.length > 1 ? 's' : ''}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+// Whether the following-day card has never been touched — Tonight only
+// offers to add it while that is still true (a filled-in day should be
+// corrected from history, not re-offered as if it were new).
+export function dayIsUnanswered(day) {
+  return !day || Object.values(day).every(v => v === null);
 }
 
 /* ── Night and event helpers ────────────────────────────────────────── */
@@ -503,6 +565,26 @@ export function pendingReviewFor(doc, nightId) {
   const previous = prevNightId(nightId);
   const night = findNight(doc, previous);
   return night && !isReviewed(night) ? previous : null;
+}
+
+// The previous recorded night's dinner / lights-out / asleep times, remapped
+// onto this night's own calendar date so accepting one lands on the right
+// day rather than the night it was copied from. Pure — a displayed
+// suggestion is not a recorded fact until a field's own "Use" tap commits it
+// (UX-HANDOFF rule 6), so this only computes; it never writes.
+export function suggestedEveningTimes(doc, nightId) {
+  const prev = findNight(doc, prevNightId(nightId));
+  const remap = iso => {
+    const p = iso ? parseIso(iso) : null;
+    if (!p) return null;
+    const date = dateForNightTime(nightId, p.time);
+    return date ? composeIso(date, p.time) : null;
+  };
+  return {
+    dinnerAt: remap(prev?.evening?.dinnerAt ?? null),
+    lightsOutAt: remap(prev?.evening?.lightsOutAt ?? null),
+    asleepAt: remap(prev?.evening?.asleepAt ?? null),
+  };
 }
 
 /* ── Migration ──────────────────────────────────────────────────────── */

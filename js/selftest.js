@@ -4,11 +4,12 @@
 
 import { createStore, STORE_KEY } from './store.js';
 import {
-  activeNightFor, composeIso, dateForNightTime, dayDateFor, emptyDoc,
-  eventSummary, exportFileName, findNight, insertEvent, isReviewed, latestEvent,
-  migrate, newEvent, newNight, nightIdFor, nightIdForIso, openNight,
-  outcomeConflict, parseIso, pendingReviewFor, prevNightId, removeEvent, toIso,
-  validateDoc,
+  activeNightFor, addDrink, composeIso, dateForNightTime, dayDateFor,
+  dayIsUnanswered, emptyDoc, eveningSummaryFor, eventSummary, exportFileName,
+  findNight, insertEvent, isReviewed, latestEvent, migrate, newDrink, newEvent,
+  newNight, nightIdFor, nightIdForIso, openNight, outcomeConflict, parseIso,
+  pendingReviewFor, prevNightId, removeDrink, removeEvent, setNoDrinks,
+  stepValue, suggestedEveningTimes, toggleSleepSign, toIso, validateDoc,
 } from './model.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -446,6 +447,80 @@ export function runSelfTests() {
     assert(name === 'peelog-2026-09-13.peelog.json', `unexpected name: ${name}`);
     assert(name.endsWith('.peelog.json'), 'the gitignored suffix is missing');
     return name;
+  });
+
+  t('Suggested evening times are computed, not written', () => {
+    const doc = emptyDoc();
+    const prev = openNight(doc, '2026-09-12');
+    prev.evening.dinnerAt = composeIso('2026-09-12', '18:30');
+    prev.evening.lightsOutAt = composeIso('2026-09-12', '20:15');
+    prev.evening.asleepAt = composeIso('2026-09-13', '00:10'); // after midnight
+    const before = JSON.stringify(doc);
+
+    const suggested = suggestedEveningTimes(doc, '2026-09-13');
+    assert(JSON.stringify(doc) === before, 'computing suggestions wrote to the document');
+    assert(suggested.dinnerAt === composeIso('2026-09-13', '18:30'), `dinner not remapped onto the new night: ${suggested.dinnerAt}`);
+    assert(suggested.lightsOutAt === composeIso('2026-09-13', '20:15'), `lights-out not remapped: ${suggested.lightsOutAt}`);
+    assert(suggested.asleepAt === composeIso('2026-09-14', '00:10'), `an after-midnight suggestion kept the wrong date: ${suggested.asleepAt}`);
+
+    const none = suggestedEveningTimes(emptyDoc(), '2026-09-13');
+    assert(none.dinnerAt === null && none.lightsOutAt === null && none.asleepAt === null, 'no previous night should suggest nothing');
+    return 'Remapped onto the new night; a document with no previous night suggests nothing';
+  });
+
+  t('noDrinks and a logged drink are mutually exclusive', () => {
+    const evening = newNight('2026-09-13').evening;
+    assert(evening.noDrinks === null && evening.drinks.length === 0, 'a fresh night started answered');
+
+    setNoDrinks(evening, true);
+    assert(evening.noDrinks === true && evening.drinks.length === 0, 'confirming none did not stick');
+
+    const drink = newDrink(composeIso('2026-09-13', '19:10'), 'cup');
+    addDrink(evening, drink);
+    assert(evening.noDrinks === null, 'logging a drink did not clear the earlier confirmed none');
+    assert(evening.drinks.length === 1 && evening.drinks[0].id === drink.id, 'the drink was not recorded');
+
+    removeDrink(evening, drink.id);
+    assert(evening.drinks.length === 0, 'removeDrink left the row in place');
+
+    addDrink(evening, newDrink());
+    setNoDrinks(evening, true);
+    assert(evening.drinks.length === 0, 'confirming none afterwards did not clear the stale row');
+
+    setNoDrinks(evening, false);
+    assert(evening.noDrinks === null, 'clearing the confirmation did not return to unknown');
+    return 'addDrink clears noDrinks; setNoDrinks(true) clears drinks either order';
+  });
+
+  t('Sleep signs: none excludes every other sign', () => {
+    assert(JSON.stringify(toggleSleepSign(null, 'none')) === '["none"]', 'selecting none from unknown failed');
+    assert(JSON.stringify(toggleSleepSign(['none'], 'snoring')) === '["snoring"]', 'adding a real sign did not drop none');
+    assert(toggleSleepSign(['snoring'], 'snoring') === null, 'removing the last sign did not return to unknown');
+    assert(JSON.stringify(toggleSleepSign(['snoring'], 'restless')) === '["snoring","restless"]', 'a second sign was not added');
+    assert(toggleSleepSign(['none'], 'none') === null, 'tapping the selected none chip did not clear it');
+    return "null → ['none'] → ['snoring'] → null; a second sign adds alongside the first";
+  });
+
+  t('Stepper value never drops below its minimum', () => {
+    assert(stepValue(null, 0, 1) === 0, 'the first tap did not answer the minimum');
+    assert(stepValue(undefined, 0, 1) === 0, 'an unset value was not treated the same as null');
+    assert(stepValue(0, 0, -1) === 0, 'stepping down from the minimum went negative');
+    assert(stepValue(2, 0, -1) === 1, 'a normal decrement was wrong');
+    return '0 is reachable without passing through 1; never below min';
+  });
+
+  t('eveningSummaryFor and dayIsUnanswered', () => {
+    const night = newNight('2026-09-13');
+    assert(eveningSummaryFor(night.evening) === null, 'an untouched evening summarised to something');
+    assert(dayIsUnanswered(night.day), 'a fresh day block was not unanswered');
+
+    night.evening.asleepAt = composeIso('2026-09-13', '20:45');
+    addDrink(night.evening, newDrink());
+    assert(eveningSummaryFor(night.evening) === 'Asleep 20:45 · 1 drink', `unexpected summary: ${eveningSummaryFor(night.evening)}`);
+
+    night.day.stool = 'none';
+    assert(!dayIsUnanswered(night.day), 'an answered false-y value (stool: none) read as unanswered');
+    return "'Asleep 20:45 · 1 drink' · stool:'none' counts as answered";
   });
 
   t('The real document was not touched', () => {

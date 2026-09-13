@@ -3,7 +3,7 @@
 // follow the design atlas (docs/ux/atlas.css) so app.css stays the one place
 // the visual system lives.
 
-import { composeIso, dateForNightTime, parseIso, timeLabelFor } from './model.js';
+import { composeIso, dateForNightTime, parseIso, stepValue, timeLabelFor } from './model.js';
 
 /* ── Element building ───────────────────────────────────────────────────
    `on:click` registers a listener; `k` becomes data-k, which is how a screen
@@ -102,7 +102,7 @@ export function savedStrip({ text, detail, onOpen, onUndo }) {
    back to null. `exclusive` is the option that cannot share a selection
    (sleep signs' "None"). */
 
-export function chipGroup({ label, options, value, multi = false, exclusive = null, onChange, help, name }) {
+export function chipGroup({ label, options, value, multi = false, exclusive = null, reduce = null, onChange, help, name }) {
   const selected = multi ? (Array.isArray(value) ? value : []) : value ?? null;
   const order = options.map(o => o.value);
 
@@ -117,7 +117,11 @@ export function chipGroup({ label, options, value, multi = false, exclusive = nu
     }, option.label);
   });
 
+  // `reduce` hands exclusivity to a caller-owned pure function (e.g. sleep
+  // signs' toggleSleepSign) so the same rule is exercised by the self-test
+  // and by the tap that triggers it, instead of two copies drifting apart.
   function nextValue(value, on) {
+    if (reduce) return reduce(selected, value);
     if (!multi) return on ? null : value;
     if (on) return selected.filter(v => v !== value);
     if (exclusive !== null && value === exclusive) return [exclusive];
@@ -218,9 +222,7 @@ export function dateTimeField({ label, value, onCommit, preview, now = () => new
    so a count of zero is reachable without passing through one. */
 
 export function stepper({ label, value, min = 0, onChange, help }) {
-  const set = delta => onChange(value === null || value === undefined
-    ? min
-    : Math.max(min, value + delta));
+  const set = delta => onChange(stepValue(value, min, delta));
 
   return h('div', { class: 'field' },
     h('span', { class: 'field-label', text: label }),
@@ -229,6 +231,29 @@ export function stepper({ label, value, min = 0, onChange, help }) {
       h('span', { class: 'stepper-value', text: value === null || value === undefined ? 'Not added' : String(value) }),
       h('button', { class: 'chip', type: 'button', k: 'plus', 'aria-label': `${label} up`, 'on:click': () => set(1) }, icon('plus'))),
     help ? h('p', { class: 'field-help', text: help }) : null);
+}
+
+/* ── Text and checkbox ──────────────────────────────────────────────────
+   Free text and a boolean, for the fields no chip group fits (a note, or
+   asleepEstimated — which is true/false, never the null "unknown" a chip
+   group would clear it to). */
+
+// Commits on blur/change, like a chip — but only when the content actually
+// changed, or focusing and leaving a field would count as answering it.
+export function textField({ label, value, placeholder = '', rows = 3, onCommit, k = 'note' }) {
+  const box = h('textarea', { rows, k, 'aria-label': label, placeholder });
+  box.value = value ?? '';
+  box.addEventListener('change', () => {
+    const next = box.value.trim();
+    if (next !== (value ?? '')) onCommit(next);
+  });
+  return h('div', { class: 'field' }, h('span', { class: 'field-label', text: label }), box);
+}
+
+export function checkbox({ label, checked, onChange, k = 'check' }) {
+  return h('label', { class: 'checkbox' },
+    h('input', { type: 'checkbox', k, checked: checked || null, 'on:change': e => onChange(e.target.checked) }),
+    h('span', { text: label }));
 }
 
 /* ── Painting ───────────────────────────────────────────────────────────

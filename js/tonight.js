@@ -3,10 +3,11 @@
 // and nothing says Saved before store.update returns ok.
 
 import {
-  EVENT_ORDER, EVENT_TYPES, activeNightFor, dayLabelFor, ensureNight, findEvent,
-  findNight, insertEvent, isReviewed, latestEvent, newEvent, nightForEvent,
-  nightIdForIso, openNight, pendingReviewFor, removeEvent, stampLabelFor,
-  timeLabelFor, toIso, weekdayNameFor,
+  EVENT_ORDER, EVENT_TYPES, activeNightFor, dayIsUnanswered, dayLabelFor,
+  ensureNight, eveningSummaryFor, findEvent, findNight, insertEvent, isReviewed,
+  latestEvent, newEvent, nightForEvent, nightIdForIso, openNight,
+  pendingReviewFor, prevNightId, removeEvent, stampLabelFor, timeLabelFor,
+  toIso, weekdayNameFor,
 } from './model.js';
 import {
   button, chipGroup, dateTimeField, h, icon, linkRow, notice, paint, savedStrip,
@@ -224,11 +225,27 @@ function tonight(ctx, draw) {
     reviewNotice(night),
     open ? detail(ctx, open, draw, { onDone: () => { state.openEventId = null; state.editingTime = false; draw(); } }) : null,
     linkRow({
+      label: 'Evening details',
+      sub: eveningSummaryFor(night?.evening) ?? 'What she wore, drinks, and sleep',
+      href: `#/evening/${active.id}`,
+      k: 'evening',
+    }),
+    linkRow({
       label: isReviewed(night) ? 'Morning review recorded' : 'Ready for the morning?',
       href: `#/morning/${active.id}`,
       k: 'morning',
     }),
+    yesterdayDaytimeLink(doc, active.id),
   ];
+}
+
+// Only while yesterday's following-day card is still untouched — once it has
+// an answer, correcting it is History's job (M3), not a nightly nag here.
+function yesterdayDaytimeLink(doc, activeId) {
+  const prevId = prevNightId(activeId);
+  const prev = findNight(doc, prevId);
+  if (!prev || !dayIsUnanswered(prev.day)) return null;
+  return linkRow({ label: "Add yesterday's daytime", href: `#/day/${prevId}`, k: 'prev-day' });
 }
 
 function header(nightId) {

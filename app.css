@@ -378,6 +378,29 @@ body.no-art .title-art img { display: none; }
 .stepper { display: flex; align-items: center; gap: 12px; }
 .stepper-value { font-size: var(--size-body); min-width: 64px; text-align: center; }
 
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: var(--size-secondary);
+  color: var(--text);
+  cursor: pointer;
+}
+.checkbox input { width: 20px; height: 20px; min-height: 0; accent-color: var(--accent); }
+
+/* ── Repeatable evening drink rows (R01) ──────────────────────────────── */
+.drink-row {
+  padding: 12px 12px 2px;
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  background: var(--raised);
+}
+.drink-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.drink-row-head .chip { min-height: 36px; padding: 6px 10px; gap: 6px; font-size: var(--size-meta); }
+.drink-row-head .chip .ico { width: 16px; height: 16px; }
+
 .notice {
   background: var(--raised);
   border-left: 2px solid var(--border);

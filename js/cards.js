@@ -1,30 +1,73 @@
-// R01 evening, R02 morning, R03 following day (IMPLEMENTATION.md §2). Only
-// R02's one-tap outcome exists yet (M1 commit 1d); renderEvening/renderDay
-// land here at M2 without moving this one.
+// R01 evening, R02 morning, R03 following day (IMPLEMENTATION.md §2). R02's
+// one-tap outcome, conflict flow and R04 confirmation are M1 (commit 1d) and
+// stay exactly as they were; M2 fills in the rest of all three cards.
 
 import {
-  dayDateFor, dayLabelFor, ensureNight, findNight, outcomeConflict, timeLabelFor,
+  DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, addDrink, dayDateFor, dayLabelFor,
+  ensureNight, findDrink, findNight, newDrink, openNight, outcomeConflict,
+  prevNightId, removeDrink, setNoDrinks, suggestedEveningTimes, timeLabelFor,
+  toggleSleepSign, weekdayNameFor,
 } from './model.js';
 import {
-  button, h, icon, linkRow, notice, paint, savedStrip, title,
+  button, checkbox, chipGroup, h, icon, linkRow, notice, paint, savedStrip,
+  stepper, textField, timeField, title,
 } from './ui.js';
 
 const NOT_SAVED = 'There isn’t enough space to save this. Keep this screen open and try again.';
 
-/* ── Screen state ───────────────────────────────────────────────────────
-   Module-level so another tab's write (store.subscribe re-render) cannot
-   erase an in-flight conflict notice or failure. renderMorning resets it. */
+/* ── Shared "quiet Saved line / S01 retry" strip ───────────────────────────
+   The same feedback shape as the event detail panel in tonight.js: a line
+   that is always in the layout (so nothing jumps), lit up on a successful
+   write, replaced by an explicit retry notice on a failed one — never a
+   checkmark for a write that did not happen. */
+
+function detailNote(cardState) {
+  if (cardState.failure) {
+    return notice({
+      kind: 'error',
+      title: 'Not saved',
+      text: NOT_SAVED,
+      children: [button({ label: 'Retry saving', k: 'retry', onClick: cardState.failure.retry })],
+    });
+  }
+  return h('p', { class: `saved-note${cardState.note ? '' : ' quiet'}` },
+    icon('check'), h('span', { text: cardState.note || 'Saved' }));
+}
+
+// Every screen's writes go through this: same success/failure shape, so
+// detailNote above is the one place that feedback is drawn.
+function writeDetail(ctx, mutate, cardState, draw) {
+  const result = ctx.store.update(mutate);
+  if (!result.ok) {
+    cardState.failure = { retry: () => writeDetail(ctx, mutate, cardState, draw) };
+    cardState.note = '';
+    draw();
+    return;
+  }
+  cardState.failure = null;
+  cardState.note = 'Saved';
+  draw();
+}
+
+/* ── Morning (R02) ──────────────────────────────────────────────────────
+   state.failure / state.conflict are the M1 outcome flow and keep their
+   original shape untouched; detailNote/detailFailure carry the new "little
+   more detail" fields below it, on the shared shape above. */
 
 const state = {
   nightId: null,
   conflict: null, // the wet event a Dry tap was refused against
   failure: null,  // the outcome a failed write should retry
+  detailNote: '',
+  detailFailure: null,
 };
 
 function reset(nightId) {
   state.nightId = nightId;
   state.conflict = null;
   state.failure = null;
+  state.detailNote = '';
+  state.detailFailure = null;
 }
 
 /* ── Writes ─────────────────────────────────────────────────────────────
@@ -56,7 +99,10 @@ function tapOutcome(ctx, night, outcome, draw) {
   writeOutcome(ctx, outcome, draw);
 }
 
-/* ── Morning (R02, one-tap outcome only) ───────────────────────────────── */
+// The "little more detail" fields never reopen the night for logging either.
+function writeMorningDetail(ctx, fn, draw) {
+  writeDetail(ctx, draft => fn(ensureNight(draft, state.nightId).morning), state, draw);
+}
 
 export function renderMorning(el, ctx) {
   reset(ctx.params.nightId);
@@ -72,6 +118,7 @@ function morning(ctx, draw) {
   const night = findNight(ctx.store.get(), id);
   const wetEvents = (night?.events ?? []).filter(e => e.type === 'wet');
   const outcome = night?.morning?.outcome ?? null;
+  const m = night?.morning ?? { wakeAt: null, changes: null, mood: null, sleepSigns: null, eventsComplete: null, note: '' };
 
   return [
     title({
@@ -86,6 +133,36 @@ function morning(ctx, draw) {
     state.conflict ? conflictNotice(ctx, draw) : null,
     state.failure ? failureNotice(ctx, draw) : null,
     outcome ? confirmation(ctx, id) : null,
+    h('h3', { text: 'A little more detail' }),
+    timeField({
+      label: 'Woke at', value: m.wakeAt, dates: dayDateFor(id), k: 'wake',
+      onCommit: iso => writeMorningDetail(ctx, morn => { morn.wakeAt = iso; }, draw),
+    }),
+    stepper({
+      label: 'Full changes', value: m.changes, min: 0,
+      help: 'Sheets or clothes; leave blank if unknown.',
+      onChange: v => writeMorningDetail(ctx, morn => { morn.changes = v; }, draw),
+    }),
+    chipGroup({
+      label: MORNING_FIELDS.mood.label, name: 'mood', options: MORNING_FIELDS.mood.options, value: m.mood,
+      onChange: v => writeMorningDetail(ctx, morn => { morn.mood = v; }, draw),
+    }),
+    chipGroup({
+      label: MORNING_FIELDS.sleepSigns.label, name: 'sleep-signs', options: MORNING_FIELDS.sleepSigns.options,
+      value: m.sleepSigns, multi: true, reduce: toggleSleepSign,
+      onChange: v => writeMorningDetail(ctx, morn => { morn.sleepSigns = v; }, draw),
+    }),
+    chipGroup({
+      label: 'Nighttime record', name: 'events-complete',
+      options: [{ value: true, label: 'Night events complete' }], value: m.eventsComplete,
+      onChange: v => writeMorningDetail(ctx, morn => { morn.eventsComplete = v; }, draw),
+    }),
+    textField({
+      label: 'Note', value: m.note, k: 'morning-note',
+      onCommit: text => writeMorningDetail(ctx, morn => { morn.note = text; }, draw),
+    }),
+    detailNote(state),
+    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.navigate('#/tonight') }),
   ];
 }
 
@@ -149,6 +226,216 @@ function confirmation(ctx, id) {
     }),
     linkRow({ label: 'Back to Tonight', href: '#/tonight', k: 'back-tonight' }),
     // History (and this route) arrive in M3; today it falls back to Tonight.
-    linkRow({ label: 'See this night', href: `#/night/${id}`, k: 'see-night' }),
-    h('p', { class: 'small', text: 'More detail arrives in the next update.' }));
+    linkRow({ label: 'See this night', href: `#/night/${id}`, k: 'see-night' }));
+}
+
+/* ── Evening (R01) ──────────────────────────────────────────────────────
+   Reached only from Tonight at M2, always the current/next night — so every
+   successful write can safely call openNight; a mere visit never writes,
+   so viewing this card alone never moves activeNightId (AGENTS.md behaviour:
+   "Opening the card ... calls openNight on the first write, not on view"). */
+
+const eveningState = { nightId: null, note: '', failure: null };
+
+function resetEvening(nightId) {
+  eveningState.nightId = nightId;
+  eveningState.note = '';
+  eveningState.failure = null;
+}
+
+function writeEvening(ctx, fn, draw) {
+  writeDetail(ctx, draft => fn(openNight(draft, eveningState.nightId)), eveningState, draw);
+}
+
+export function renderEvening(el, ctx) {
+  resetEvening(ctx.params.nightId);
+  const draw = () => paint(el, evening(ctx, draw));
+  draw();
+  return ctx.store.subscribe(draw);
+}
+
+function evening(ctx, draw) {
+  const id = eveningState.nightId;
+  const doc = ctx.store.get();
+  const night = findNight(doc, id);
+  const ev = night?.evening ?? { drinks: [], dayContext: [] };
+  const dates = [id, dayDateFor(id)];
+  const suggested = suggestedEveningTimes(doc, id);
+  const prevId = prevNightId(id);
+  const prevExists = !!findNight(doc, prevId);
+
+  return [
+    title({
+      overline: dayLabelFor(id),
+      name: 'Evening',
+      lead: 'Before the night starts. Everything here can wait.',
+    }),
+    chipGroup({
+      label: EVENING_FIELDS.diaper.label, name: 'diaper', options: EVENING_FIELDS.diaper.options,
+      value: night?.diaper ?? null,
+      onChange: v => writeEvening(ctx, n => { n.diaper = v; }, draw),
+    }),
+    timeField({
+      label: 'Dinner', value: ev.dinnerAt, dates, k: 'dinner', suggested: suggested.dinnerAt,
+      onCommit: iso => writeEvening(ctx, n => { n.evening.dinnerAt = iso; }, draw),
+    }),
+    h('h3', { text: 'Evening drinks' }),
+    ev.drinks.map((drink, i) => drinkRow(ctx, id, dates, drink, i, draw)),
+    button({
+      label: '+ Add drink', k: 'add-drink',
+      onClick: () => writeEvening(ctx, n => addDrink(n.evening, newDrink()), draw),
+    }),
+    chipGroup({
+      label: 'Or confirm', name: 'no-drinks', options: [{ value: true, label: 'No evening drinks' }],
+      value: ev.noDrinks,
+      onChange: v => writeEvening(ctx, n => setNoDrinks(n.evening, v), draw),
+    }),
+    h('h3', { text: 'Last toilet' }),
+    timeField({
+      label: 'Time', value: ev.lastToiletAt, dates, k: 'last-toilet',
+      onCommit: iso => writeEvening(ctx, n => { n.evening.lastToiletAt = iso; }, draw),
+    }),
+    chipGroup({
+      label: 'How much?', name: 'last-toilet-output', options: EVENING_FIELDS.lastToiletOutput.options,
+      value: ev.lastToiletOutput,
+      onChange: v => writeEvening(ctx, n => { n.evening.lastToiletOutput = v; }, draw),
+    }),
+    h('h3', { text: 'Sleep' }),
+    timeField({
+      label: 'Lights out', value: ev.lightsOutAt, dates, k: 'lights-out', suggested: suggested.lightsOutAt,
+      onCommit: iso => writeEvening(ctx, n => { n.evening.lightsOutAt = iso; }, draw),
+    }),
+    timeField({
+      label: 'Fell asleep', value: ev.asleepAt, dates, k: 'asleep', suggested: suggested.asleepAt,
+      onCommit: iso => writeEvening(ctx, n => { n.evening.asleepAt = iso; }, draw),
+    }),
+    checkbox({
+      label: 'Estimated', checked: !!ev.asleepEstimated, k: 'asleep-estimated',
+      onChange: v => writeEvening(ctx, n => { n.evening.asleepEstimated = v; }, draw),
+    }),
+    chipGroup({
+      label: EVENING_FIELDS.dayContext.label, name: 'day-context', options: EVENING_FIELDS.dayContext.options,
+      value: ev.dayContext, multi: true,
+      onChange: v => writeEvening(ctx, n => { n.evening.dayContext = v; }, draw),
+    }),
+    textField({
+      label: 'Note', value: ev.note, k: 'evening-note',
+      onCommit: text => writeEvening(ctx, n => { n.evening.note = text; }, draw),
+    }),
+    routineRow(doc, night),
+    detailNote(eveningState),
+    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.navigate('#/tonight') }),
+    prevExists
+      ? linkRow({ label: 'Yesterday’s daytime', href: `#/day/${prevId}`, k: 'prev-day' })
+      : null,
+  ];
+}
+
+function drinkRow(ctx, id, dates, drink, index, draw) {
+  return h('div', { class: 'drink-row' },
+    h('div', { class: 'drink-row-head' },
+      h('span', { class: 'field-label', text: `Drink ${index + 1}` }),
+      h('button', {
+        class: 'chip', type: 'button', k: `drink-remove-${drink.id}`,
+        'on:click': () => writeEvening(ctx, n => { removeDrink(n.evening, drink.id); }, draw),
+      }, icon('close'), 'Remove')),
+    timeField({
+      label: 'Time', value: drink.at, dates, k: `drink-time-${drink.id}`,
+      onCommit: iso => writeEvening(ctx, n => {
+        const d = findDrink(n.evening, drink.id);
+        if (d) d.at = iso;
+      }, draw),
+    }),
+    chipGroup({
+      label: 'Amount', name: `drink-size-${drink.id}`, options: EVENING_FIELDS.drinkSize.options, value: drink.size,
+      onChange: v => writeEvening(ctx, n => {
+        const d = findDrink(n.evening, drink.id);
+        if (d) d.size = v;
+      }, draw),
+    }));
+}
+
+// M5 adds routine assignment; until then night.experimentId is always null
+// and this row stays omitted, exactly as it will for a night with no
+// assigned routine once assignment exists.
+function routineRow(doc, night) {
+  const id = night?.experimentId ?? null;
+  const exp = id ? doc.experiments.find(e => e.id === id) : null;
+  if (!exp) return null;
+  return linkRow({
+    label: exp.name,
+    sub: exp.to ? `${exp.from} – ${exp.to}` : `since ${exp.from}`,
+    href: `#/routines/${exp.id}`,
+    k: 'routine',
+  });
+}
+
+/* ── Following day (R03) ────────────────────────────────────────────────
+   ensureNight, not openNight: filling in yesterday's daytime must never
+   move tonight's activeNightId. */
+
+const dayState = { nightId: null, note: '', failure: null };
+
+function resetDay(nightId) {
+  dayState.nightId = nightId;
+  dayState.note = '';
+  dayState.failure = null;
+}
+
+function writeDay(ctx, fn, draw) {
+  writeDetail(ctx, draft => fn(ensureNight(draft, dayState.nightId)), dayState, draw);
+}
+
+export function renderDay(el, ctx) {
+  resetDay(ctx.params.nightId);
+  const draw = () => paint(el, day(ctx, draw));
+  draw();
+  return ctx.store.subscribe(draw);
+}
+
+function day(ctx, draw) {
+  const id = dayState.nightId;
+  const night = findNight(ctx.store.get(), id);
+  const d = night?.day ?? {
+    toiletCount: null, urgency: null, holding: null, accidents: null, stool: null, fluids: null,
+  };
+  const dayDate = dayDateFor(id);
+
+  return [
+    title({
+      overline: `${weekdayNameFor(dayDate)} daytime · following ${weekdayNameFor(id)} night`,
+      name: 'The day after',
+      lead: 'Daytime notes for the day after this night, kept separate from the night itself.',
+    }),
+    stepper({
+      label: DAY_FIELDS.toiletCount.label, value: d.toiletCount, min: 0,
+      onChange: v => writeDay(ctx, n => { n.day.toiletCount = v; }, draw),
+    }),
+    chipGroup({
+      label: DAY_FIELDS.urgency.label, name: 'urgency', options: DAY_FIELDS.urgency.options, value: d.urgency,
+      onChange: v => writeDay(ctx, n => { n.day.urgency = v; }, draw),
+    }),
+    chipGroup({
+      label: DAY_FIELDS.holding.label, name: 'holding', options: DAY_FIELDS.holding.options, value: d.holding,
+      help: DAY_FIELDS.holding.hint,
+      onChange: v => writeDay(ctx, n => { n.day.holding = v; }, draw),
+    }),
+    stepper({
+      label: DAY_FIELDS.accidents.label, value: d.accidents, min: 0,
+      onChange: v => writeDay(ctx, n => { n.day.accidents = v; }, draw),
+    }),
+    chipGroup({
+      label: DAY_FIELDS.stool.label, name: 'stool', options: DAY_FIELDS.stool.options, value: d.stool,
+      onChange: v => writeDay(ctx, n => { n.day.stool = v; }, draw),
+    }),
+    chipGroup({
+      label: DAY_FIELDS.fluids.label, name: 'fluids', options: DAY_FIELDS.fluids.options, value: d.fluids,
+      onChange: v => writeDay(ctx, n => { n.day.fluids = v; }, draw),
+    }),
+    detailNote(dayState),
+    button({
+      label: 'Done', k: 'done', kind: 'primary',
+      onClick: () => { if (history.length > 1) history.back(); else ctx.navigate('#/tonight'); },
+    }),
+  ];
 }
