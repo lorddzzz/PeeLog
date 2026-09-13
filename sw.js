@@ -1,6 +1,6 @@
 // PeeLog service worker. Must sit at the repo root so its scope covers the
 // whole app. Bump CACHE on every deploy that changes a precached file.
-const CACHE = 'peelog-shell-v6';
+const CACHE = 'peelog-shell-v7';
 
 const SHELL = [
   './',
@@ -24,8 +24,13 @@ const SHELL = [
   'assets/art/bedside-notebook.jpg',
 ];
 
+// cache: 'reload' bypasses the HTTP cache: without it a file the browser still
+// holds a fresh copy of is precached at its old bytes, so a bumped CACHE can
+// install the very version it was bumped to replace.
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(SHELL.map(p => new Request(p, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

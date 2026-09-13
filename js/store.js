@@ -1,7 +1,7 @@
 // The single writer. Screens never touch localStorage (DESIGN.md §9), so a
 // sync layer can slot in later behind get / update / subscribe.
 
-import { emptyDoc, migrate } from './model.js';
+import { clone, emptyDoc, migrate } from './model.js';
 
 // Re-exported because they answer "which night does this tap belong to?", and
 // every caller of that question already holds the store.
@@ -61,7 +61,7 @@ export function createStore(storage = localStorage, key = STORE_KEY) {
   function update(fn) {
     let draft;
     try {
-      draft = structuredClone(doc);
+      draft = clone(doc);
       fn(draft);
     } catch (error) {
       return { ok: false, error };
@@ -72,7 +72,7 @@ export function createStore(storage = localStorage, key = STORE_KEY) {
   // Whole-document swap for restore; same write path, same failure contract.
   function replace(next) {
     let copy;
-    try { copy = structuredClone(next); } catch (error) { return { ok: false, error }; }
+    try { copy = clone(next); } catch (error) { return { ok: false, error }; }
     return commit(copy);
   }
 

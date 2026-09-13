@@ -5,9 +5,9 @@
 import {
   EVENT_ORDER, EVENT_TYPES, activeNightFor, dayIsUnanswered, dayLabelFor,
   ensureNight, eveningSummaryFor, findEvent, findNight, insertEvent, isReviewed,
-  latestEvent, newEvent, nightForEvent, nightIdForIso, openNight,
-  pendingReviewFor, prevNightId, removeEvent, stampLabelFor, timeLabelFor,
-  toIso, weekdayNameFor,
+  isUntouchedNight, latestEvent, newEvent, nightForEvent, nightIdFor,
+  nightIdForIso, openNight, pendingReviewFor, prevNightId, removeEvent,
+  stampLabelFor, timeLabelFor, toIso, weekdayNameFor,
 } from './model.js';
 import {
   button, chipGroup, dateTimeField, h, icon, linkRow, notice, paint, savedStrip,
@@ -76,12 +76,18 @@ function reset() {
 function logEvent(ctx, type, draw, { at, onLogged } = {}) {
   const now = ctx.now();
   const t = at ?? toIso(now);
-  const { id } = activeNightFor(ctx.store.get(), now);
+  // The event's own timestamp decides its night, never whichever night happens
+  // to be open: a retry that crosses 15:00 keeps the night it happened in, and
+  // a device clock that once ran fast cannot pull tonight into a future night.
+  const tonightId = nightIdFor(now);
+  const id = nightIdForIso(t) ?? tonightId;
   const reviewed = isReviewed(findNight(ctx.store.get(), id));
   let created = null;
 
   const result = ctx.store.update(draft => {
-    const night = openNight(draft, id);
+    // Only a tap that belongs to tonight opens a night for logging; filing a
+    // late retry into an earlier one must not move activeNightId backwards.
+    const night = id === tonightId ? openNight(draft, id) : ensureNight(draft, id);
     created = insertEvent(night, newEvent(type, t)).id;
   });
 
@@ -151,20 +157,33 @@ function setText(ctx, event, key, value, draw, box) {
     draw();
     return;
   }
+  // A "Not saved" notice sits where the Saved line would be, so a write that
+  // succeeds after a failed one has to redraw — the finger that is still on
+  // Done was over the notice, not over the button.
+  const hadError = !!state.panelError;
   state.panelError = '';
   state.panelNote = 'Saved';
+  if (hadError) { draw(); return; }
   box.closest('.detail')?.querySelector('.saved-note')?.classList.remove('quiet');
 }
 
 // An edited timestamp moves the event, and may move it to another night.
 function moveEvent(ctx, event, t, draw) {
   const to = nightIdForIso(t);
+  const moved = to !== nightIdForIso(event.t);
+  const reviewed = isReviewed(findNight(ctx.store.get(), to));
   const result = ctx.store.update(draft => {
     const from = nightForEvent(draft, event.id);
     if (!from) return;
-    const moved = removeEvent(from, event.id);
-    moved.t = t;
-    insertEvent(to === from.id ? from : ensureNight(draft, to), moved);
+    const entry = removeEvent(from, event.id);
+    entry.t = t;
+    insertEvent(to === from.id ? from : ensureNight(draft, to), entry);
+    // A night that held nothing but this event is not a night that happened —
+    // left behind, it would ask every evening to review a blank record.
+    if (to !== from.id && isUntouchedNight(from)) {
+      draft.nights.splice(draft.nights.indexOf(from), 1);
+      if (draft.activeNightId === from.id) draft.activeNightId = null;
+    }
   });
   if (!result.ok) {
     state.panelError = NOT_SAVED;
@@ -173,9 +192,11 @@ function moveEvent(ctx, event, t, draw) {
   }
   state.panelError = '';
   state.editingTime = false;
-  const moved = to !== nightIdForIso(event.t);
   state.panelNote = moved ? '' : 'Saved';
   state.moveNote = moved ? `Moved to the night of ${dayLabelFor(to)}.` : '';
+  // Same rule as a new tap: an outcome someone already recorded is never
+  // silently changed by an entry arriving under it.
+  if (moved && reviewed) state.reviewTouched = to;
   draw();
 }
 
@@ -222,7 +243,7 @@ function tonight(ctx, draw) {
       : savedStrip({ text: 'Nothing logged yet', detail: 'Ready whenever you need it.' }),
     state.undoError ? notice({ kind: 'error', title: state.undoError, text: 'The entry is still recorded. Try Undo again.' }) : null,
     state.moveNote ? notice({ text: state.moveNote }) : null,
-    reviewNotice(night),
+    reviewNotice(doc, active.id),
     open ? detail(ctx, open, draw, { onDone: () => { state.openEventId = null; state.editingTime = false; draw(); } }) : null,
     linkRow({
       label: 'Evening details',
@@ -274,13 +295,20 @@ function staleNotice(nightId) {
   });
 }
 
-function reviewNotice(night) {
-  if (!night || state.reviewTouched !== night.id || !isReviewed(night)) return null;
+// An entry landed under a night whose review is already recorded — by a tap or
+// by a move. A night other than the one on screen is named, or the warning
+// reads as if it were about tonight.
+function reviewNotice(doc, shownId) {
+  const id = state.reviewTouched;
+  const night = id ? findNight(doc, id) : null;
+  if (!night || !isReviewed(night)) return null;
   return notice({
     kind: 'warm',
     title: 'Morning review may need updating',
-    text: 'This night already has an outcome recorded.',
-    children: [linkRow({ label: `Review ${weekdayNameFor(night.id)} again`, href: `#/morning/${night.id}`, k: 'rereview' })],
+    text: id === shownId
+      ? 'This night already has an outcome recorded.'
+      : `The night of ${dayLabelFor(id)} already has an outcome recorded.`,
+    children: [linkRow({ label: `Review ${weekdayNameFor(id)} again`, href: `#/morning/${id}`, k: 'rereview' })],
   });
 }
 
@@ -338,6 +366,10 @@ function eventScreen(ctx, draw) {
   }
   return [
     title({ overline: stampLabelFor(event.t), name: EVENT_TYPES[event.type].label }),
+    // The time can be edited here too, so the move and re-review notices
+    // belong here as well — the same feedback Tonight gives.
+    state.moveNote ? notice({ text: state.moveNote }) : null,
+    reviewNotice(doc, night?.id ?? null),
     detail(ctx, event, draw, {
       onDone: () => ctx.navigate('#/tonight'),
       heading: false,

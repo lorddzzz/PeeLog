@@ -4,12 +4,13 @@
 
 import { createStore, STORE_KEY } from './store.js';
 import {
-  activeNightFor, addDrink, composeIso, dateForNightTime, dayDateFor,
-  dayIsUnanswered, emptyDoc, eveningSummaryFor, eventSummary, exportFileName,
-  findNight, insertEvent, isReviewed, latestEvent, migrate, newDrink, newEvent,
-  newNight, nightIdFor, nightIdForIso, openNight, outcomeConflict, parseIso,
-  pendingReviewFor, prevNightId, removeDrink, removeEvent, setNoDrinks,
-  stepValue, suggestedEveningTimes, toggleSleepSign, toIso, validateDoc,
+  activeNightFor, addDrink, clone, composeIso, dateForNightTime, dayDateFor,
+  dayIsUnanswered, emptyDoc, ensureNight, eveningSummaryFor, eventSummary,
+  exportFileName, findNight, insertEvent, isReviewed, isUntouchedNight,
+  latestEvent, migrate, newDrink, newEvent, newNight, nightIdFor, nightIdForIso,
+  openNight, outcomeConflict, parseIso, pendingReviewFor, prevNightId,
+  removeDrink, removeEvent, setNoDrinks, stepValue, suggestedEveningTimes,
+  toggleSleepSign, toIso, validateDoc,
 } from './model.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -245,6 +246,57 @@ export function runSelfTests() {
     return iso;
   });
 
+  t('composeIso refuses a wall clock that does not exist', () => {
+    assert(composeIso('2026-09-13', '99:99') === null, '99:99 was accepted (Date rolls it four days on)');
+    assert(composeIso('2026-09-13', '24:00') === null, '24:00 was accepted');
+    assert(composeIso('2026-09-13', '12:60') === null, 'a 60th minute was accepted');
+    assert(composeIso('2026-02-30', '10:00') === null, 'a date that does not exist was accepted');
+    assert(composeIso('2026-09-13', '') === null, 'an empty time was accepted');
+
+    // Whatever zone this device is in, anything returned must read back as
+    // exactly what was asked for.
+    for (const date of ['2026-03-08', '2026-03-29', '2026-10-25', '2026-11-01']) {
+      for (const time of ['00:30', '01:30', '02:30', '03:30', '23:30']) {
+        const iso = composeIso(date, time);
+        if (iso === null) continue;
+        const p = parseIso(iso);
+        assert(p.date === date && p.time === time, `${date} ${time} became ${iso}`);
+      }
+    }
+    // And on a device that does skip an hour, the skipped time is refused
+    // rather than silently recorded as the hour after it.
+    if (new Date(2026, 2, 29, 2, 30).getHours() !== 2) {
+      assert(composeIso('2026-03-29', '02:30') === null, 'a wall clock the DST jump skips was accepted');
+    }
+    return 'Out-of-range and DST-skipped wall clocks return null, never the next valid instant';
+  });
+
+  t('A UTC Z timestamp is refused, and migrated to an offset', () => {
+    assert(parseIso('2026-09-13T14:00:00Z') === null, 'a Z timestamp was accepted as an instant');
+    const stored = {
+      version: 1,
+      activeNightId: null,
+      experiments: [],
+      settings: {},
+      nights: [{
+        id: '2026-09-13',
+        evening: { dinnerAt: '2026-09-13T18:30:00Z', drinks: [{ id: 'd-1', at: '2026-09-13T19:00:00Z', size: 'cup' }] },
+        events: [{ id: 'e-z', type: 'wet', t: '2026-09-14T02:12:00Z' }],
+        morning: { wakeAt: '2026-09-14T06:30:00Z' },
+      }],
+    };
+    const m = migrate(stored);
+    assert(m.ok, 'the document was refused instead of migrated');
+    const night = m.doc.nights[0];
+    assert(night.events[0].t === '2026-09-14T02:12:00+00:00', `event: ${night.events[0].t}`);
+    assert(night.evening.dinnerAt === '2026-09-13T18:30:00+00:00', `dinner: ${night.evening.dinnerAt}`);
+    assert(night.evening.drinks[0].at === '2026-09-13T19:00:00+00:00', `drink: ${night.evening.drinks[0].at}`);
+    assert(night.morning.wakeAt === '2026-09-14T06:30:00+00:00', `wake: ${night.morning.wakeAt}`);
+    const check = validateDoc(m.doc);
+    assert(check.ok, `the migrated document is still invalid: ${check.errors.join('; ')}`);
+    return 'Z refused by parseIso · every stored Z instant rewritten to +00:00';
+  });
+
   t('Events stay in time order', () => {
     const night = newNight('2026-09-13');
     insertEvent(night, newEvent('drink', '2026-09-13T22:00:00+02:00'));
@@ -314,6 +366,99 @@ export function runSelfTests() {
     return 'Logged into 09-13; 09-12 keeps its event and its review link';
   });
 
+  t('Every event is filed under the night of its own timestamp', () => {
+    // The night choice tonight.js makes on a tap, and the invariant it exists
+    // for: an event only ever sits in the night its own wall clock falls in.
+    const doc = emptyDoc();
+    const file = (type, t, now) => {
+      const tonightId = nightIdFor(now);
+      const id = nightIdForIso(t) ?? tonightId;
+      const night = id === tonightId ? openNight(doc, id) : ensureNight(doc, id);
+      return insertEvent(night, newEvent(type, t));
+    };
+    const misfiled = () => doc.nights.flatMap(n =>
+      n.events.filter(e => nightIdForIso(e.t) !== n.id).map(e => `${n.id} holds ${e.t}`));
+
+    // A device clock that ran fast left a night open in the future. It must
+    // absorb nothing, and it is not a night anyone can review yet.
+    doc.activeNightId = '2027-01-01';
+    ensureNight(doc, '2027-01-01');
+    const evening = new Date(2026, 8, 13, 23, 40);
+    const a = activeNightFor(doc, evening);
+    assert(a.id === '2026-09-13' && a.stale === null, `future active night: ${JSON.stringify(a)}`);
+
+    file('drink', toIso(evening), evening);
+    const past = new Date(2026, 8, 14, 2, 12);
+    file('wet', toIso(past), past);
+    // A tap that failed at 14:50 and was retried at 15:10 keeps the night it
+    // happened in, not the one that opened while the notice was on screen.
+    const retried = file('lift', toIso(new Date(2026, 8, 13, 14, 50)), new Date(2026, 8, 13, 15, 10));
+    assert(nightIdForIso(retried.t) === '2026-09-12', 'the retry lost its own night');
+    assert(findNight(doc, '2026-09-12').events.length === 1, 'the retry did not land in 09-12');
+    assert(doc.activeNightId === '2026-09-13', 'a late retry moved the open night backwards');
+    assert(findNight(doc, '2026-09-13').events.length === 2, '09-13 lost an event');
+    assert(findNight(doc, '2027-01-01').events.length === 0, 'the future night absorbed an event');
+    assert(misfiled().length === 0, `misfiled: ${misfiled().join(', ')}`);
+    return 'Evening tap, after-midnight tap and a retry across 15:00 each land in their own night';
+  });
+
+  t('A night nobody answered anything on is untouched', () => {
+    assert(isUntouchedNight(newNight('2026-09-13')), 'a fresh night was not untouched');
+    assert(isUntouchedNight(null) === false, 'a missing night read as untouched');
+    const touch = fn => {
+      const n = newNight('2026-09-13');
+      fn(n);
+      return isUntouchedNight(n);
+    };
+    assert(touch(n => insertEvent(n, newEvent('wet', '2026-09-14T02:12:00+02:00'))) === false, 'an event');
+    assert(touch(n => { n.diaper = 'none'; }) === false, 'diaper: none is an answer');
+    assert(touch(n => { n.experimentId = 'x-1'; }) === false, 'an assigned routine');
+    assert(touch(n => { n.morning.outcome = 'dry'; }) === false, 'a recorded outcome');
+    assert(touch(n => { n.morning.changes = 0; }) === false, 'an answered 0');
+    assert(touch(n => { n.evening.asleepEstimated = true; }) === false, 'an estimated flag');
+    assert(touch(n => { n.evening.note = 'late nap'; }) === false, 'a note');
+    assert(touch(n => { n.evening.dayContext = ['nap']; }) === false, 'a day context');
+    assert(touch(n => addDrink(n.evening, newDrink())) === false, 'a drink row');
+    assert(touch(n => { n.day.stool = 'none'; }) === false, "day stool: 'none' is an answer");
+    return 'Defaults only; false, 0 and none all count as answered';
+  });
+
+  t('Moving an event leaves no phantom night behind', () => {
+    const doc = emptyDoc();
+    const ev = insertEvent(openNight(doc, '2026-09-13'), newEvent('wet', composeIso('2026-09-14', '02:12')));
+    // The sequence tonight.js moveEvent runs: out of one night, into the night
+    // the new timestamp belongs to, and the emptied source dropped with it.
+    const move = t => {
+      const from = doc.nights.find(n => n.events.some(e => e.id === ev.id));
+      const to = nightIdForIso(t);
+      const entry = removeEvent(from, ev.id);
+      entry.t = t;
+      insertEvent(to === from.id ? from : ensureNight(doc, to), entry);
+      if (to !== from.id && isUntouchedNight(from)) {
+        doc.nights.splice(doc.nights.indexOf(from), 1);
+        if (doc.activeNightId === from.id) doc.activeNightId = null;
+      }
+    };
+    const filed = () => doc.nights.every(n => n.events.every(e => nightIdForIso(e.t) === n.id));
+
+    move(composeIso('2026-09-13', '02:12'));
+    assert(findNight(doc, '2026-09-13') === null, 'the emptied source night was kept');
+    assert(doc.activeNightId === null, 'activeNightId still points at a night that was deleted');
+    assert(findNight(doc, '2026-09-12').events.length === 1, 'the event did not arrive');
+    assert(filed(), 'an event sits in the wrong night after a move');
+
+    // A night with an answer on it stays, even once its last event leaves.
+    const reviewed = ensureNight(doc, '2026-09-13');
+    reviewed.morning.outcome = 'dry';
+    move(composeIso('2026-09-14', '02:12'));
+    assert(findNight(doc, '2026-09-12') === null, 'the second emptied night was kept');
+    move(composeIso('2026-09-13', '02:12'));
+    assert(findNight(doc, '2026-09-13')?.morning.outcome === 'dry', 'a reviewed night was deleted');
+    assert(findNight(doc, '2026-09-13').events.length === 0, 'the event did not leave the reviewed night');
+    assert(filed(), 'an event sits in the wrong night after a move');
+    return 'The empty source night is dropped; a reviewed one is kept';
+  });
+
   t('A typed time belongs to the right calendar date', () => {
     // 02:12 on the night of the 13th is the 14th; 23:40 is still the 13th.
     assert(dateForNightTime('2026-09-13', '23:40') === '2026-09-13', 'an evening time moved date');
@@ -365,19 +510,40 @@ export function runSelfTests() {
     const good = validateDoc(doc);
     assert(good.ok, `a good document was rejected: ${good.errors.join('; ')}`);
 
-    const bare = structuredClone(doc);
+    const bare = clone(doc);
     bare.nights[0].events[0].t = '2026-09-13T22:00';
     assert(!validateDoc(bare).ok, 'a timestamp without an offset was accepted');
 
-    const swapped = structuredClone(doc);
+    const utc = clone(doc);
+    utc.nights[0].events[0].t = '2026-09-13T20:00:00Z';
+    assert(!validateDoc(utc).ok, 'a UTC Z timestamp was accepted');
+
+    const swapped = clone(doc);
     swapped.nights[0].events.reverse();
     assert(!validateDoc(swapped).ok, 'out-of-order events were accepted');
 
-    const dupes = structuredClone(doc);
-    dupes.nights.push(structuredClone(dupes.nights[0]));
+    const dupes = clone(doc);
+    dupes.nights.push(clone(dupes.nights[0]));
     assert(!validateDoc(dupes).ok, 'duplicate night ids were accepted');
 
-    const wrongType = structuredClone(doc);
+    // One id, two nights: nightForEvent finds only the first, so an edit to
+    // the second would land on the wrong entry.
+    const sameId = clone(doc);
+    const second = clone(sameId.nights[0]);
+    second.id = '2026-09-14';
+    sameId.nights.push(second);
+    assert(!validateDoc(sameId).ok, 'the same event id in two nights was accepted');
+
+    const twice = clone(doc);
+    twice.nights[0].events[1].id = twice.nights[0].events[0].id;
+    assert(!validateDoc(twice).ok, 'a repeated event id within a night was accepted');
+
+    const drinks = clone(doc);
+    drinks.nights[0].evening.drinks = [newDrink(), newDrink()];
+    drinks.nights[0].evening.drinks[1].id = drinks.nights[0].evening.drinks[0].id;
+    assert(!validateDoc(drinks).ok, 'a repeated drink id within a night was accepted');
+
+    const wrongType = clone(doc);
     wrongType.nights[0].events[0].type = 'nap';
     assert(!validateDoc(wrongType).ok, 'an unknown event type was accepted');
     assert(!validateDoc({ version: 2, nights: [], experiments: [], settings: {}, activeNightId: null }).ok, 'a newer version was accepted');

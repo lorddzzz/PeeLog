@@ -63,6 +63,13 @@ a { color: inherit; }
 button, input, select, textarea { font: inherit; }
 button, a, select { -webkit-tap-highlight-color: transparent; }
 
+/* Two taps on the action grid at 3am are two events, never a double-tap zoom —
+   which would also cost every first tap Safari's 300ms wait. */
+.action, .chip, .button, .linkrow, .tabs a, .actions button,
+.saved .what, .saved .undo {
+  touch-action: manipulation;
+}
+
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 4px;

@@ -4,6 +4,11 @@
 
 export const DOC_VERSION = 1;
 
+// The document is JSON by definition — it is written to localStorage as a
+// string — so this is the copy everything uses. structuredClone would tie the
+// boot path to Safari 15.4 for nothing.
+export const clone = x => JSON.parse(JSON.stringify(x));
+
 /* ── Time ───────────────────────────────────────────────────────────────
    Every stored instant carries the offset it was recorded at. A bare local
    time silently corrupts "hours after falling asleep" across a DST change or
@@ -13,7 +18,11 @@ export const DOC_VERSION = 1;
 // Evenings start at 15:00; anything before that belongs to the night before.
 const NIGHT_START_HOUR = 15;
 
-const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+// A numeric offset only: 'Z' parses as an instant but its wall clock is UTC's,
+// not the one the tap happened in, so reading it literally moves both the time
+// shown and the night it belongs to. migrate rewrites any stored Z instead.
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?([+-]\d{2}:\d{2})$/;
+const Z_ISO_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)Z$/;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const pad = (n, w = 2) => String(n).padStart(w, '0');
@@ -47,12 +56,18 @@ export function isDateStr(value) {
   return u.getUTCFullYear() === y && u.getUTCMonth() === mo - 1 && u.getUTCDate() === d;
 }
 
-// Local wall-clock parts → an instant stamped with this device's offset.
+// Local wall-clock parts → an instant stamped with this device's offset, or
+// null if that wall clock does not exist. Date rolls both out-of-range parts
+// ('99:99' lands four days later) and the hour a spring-forward skips (02:30
+// becomes 03:30) silently forward, which would record a time nobody typed —
+// so the result has to read back as exactly what was asked for.
 export function composeIso(dateStr, timeStr) {
   const d = typeof dateStr === 'string' ? DATE_RE.exec(dateStr) : null;
-  const t = typeof timeStr === 'string' ? /^(\d{2}):(\d{2})/.exec(timeStr) : null;
-  if (!d || !t) return null;
-  return toIso(new Date(+d[1], +d[2] - 1, +d[3], +t[1], +t[2], 0, 0));
+  const t = typeof timeStr === 'string' ? /^(\d{2}):(\d{2})$/.exec(timeStr) : null;
+  if (!d || !t || +t[1] > 23 || +t[2] > 59) return null;
+  const iso = toIso(new Date(+d[1], +d[2] - 1, +d[3], +t[1], +t[2], 0, 0));
+  const p = parseIso(iso);
+  return p && p.date === dateStr && p.time === timeStr ? iso : null;
 }
 
 // Date arithmetic runs in UTC: a local midnight can be skipped entirely by a
@@ -533,6 +548,21 @@ export function nightForEvent(doc, eventId) {
   return doc.nights.find(n => n.events.some(e => e.id === eventId)) ?? null;
 }
 
+// A night nobody has answered anything on: no events, nothing worn, no
+// routine, and every evening / morning / day field still at its constructed
+// default. Moving the only event out of such a night leaves a record of a
+// night that never happened, which then asks to be reviewed.
+export function isUntouchedNight(night) {
+  if (!night || night.events?.length) return false;
+  if ((night.diaper ?? null) !== null || (night.experimentId ?? null) !== null) return false;
+  const fresh = newNight(night.id);
+  return ['evening', 'morning', 'day'].every(block => {
+    const got = night[block] ?? {};
+    return Object.entries(fresh[block]).every(([k, v]) =>
+      got[k] === undefined || JSON.stringify(got[k]) === JSON.stringify(v));
+  });
+}
+
 // morning.outcome !== null *is* reviewed — there is no separate flag to fall
 // out of sync with it.
 export const isReviewed = night => (night?.morning?.outcome ?? null) !== null;
@@ -551,8 +581,11 @@ export function outcomeConflict(night, outcome) {
 export function activeNightFor(doc, now = new Date()) {
   const current = nightIdFor(now);
   const active = doc.activeNightId;
-  if (active && active >= current) return { id: active, stale: null };
-  const pending = active && !isReviewed(findNight(doc, active)) ? active : null;
+  if (active === current) return { id: active, stale: null };
+  // A night open in the future is a clock artefact — a device clock that ran
+  // fast, or a flight west. Tonight's taps belong to tonight either way, and a
+  // night that has not happened yet is never offered for review.
+  const pending = active && active < current && !isReviewed(findNight(doc, active)) ? active : null;
   return { id: current, stale: pending };
 }
 
@@ -594,10 +627,22 @@ export function suggestedEveningTimes(doc, nightId) {
 function fillDefaults(value, defaults) {
   const out = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
   for (const [k, v] of Object.entries(defaults)) {
-    if (!(k in out)) out[k] = structuredClone(v);
+    if (!(k in out)) out[k] = clone(v);
     else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = fillDefaults(out[k], v);
   }
   return out;
+}
+
+// An instant written as UTC by an older build (or by a hand-edited file) is
+// the same fact, so it is rewritten rather than refused — every timestamp in
+// the document, wherever it sits, since all of them are read as wall clocks.
+function normaliseInstants(value) {
+  if (typeof value === 'string') return value.replace(Z_ISO_RE, '$1+00:00');
+  if (Array.isArray(value)) return value.map(normaliseInstants);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normaliseInstants(v)]));
+  }
+  return value;
 }
 
 export function migrate(doc) {
@@ -608,7 +653,7 @@ export function migrate(doc) {
   if (doc.version > DOC_VERSION) return { ok: false, reason: 'newer' };
 
   // Cloned first so the returned document shares nothing with the parsed input.
-  const src = structuredClone(doc);
+  const src = normaliseInstants(clone(doc));
   const out = fillDefaults(src, emptyDoc());
   out.version = DOC_VERSION;
   out.nights = (Array.isArray(src.nights) ? src.nights : []).map(n => {
@@ -646,6 +691,10 @@ export function validateDoc(doc) {
   }
 
   let prevId = '';
+  // Event ids address an event across the whole document (nightForEvent takes
+  // no night), so a repeat would make one of them unreachable and edits land
+  // on the other. Drink ids are only ever looked up inside their own evening.
+  const seenEvents = new Set();
   doc.nights.forEach((night, i) => {
     const at = `nights[${i}]`;
     if (!night || typeof night !== 'object') { add(`${at} is not an object`); return; }
@@ -658,7 +707,15 @@ export function validateDoc(doc) {
     else {
       for (const k of ['dinnerAt', 'lastToiletAt', 'lightsOutAt', 'asleepAt']) checkIso(evening[k], `${at}.evening.${k}`);
       if (!Array.isArray(evening.drinks)) add(`${at}.evening.drinks is not an array`);
-      else evening.drinks.forEach((d, j) => checkIso(d?.at, `${at}.evening.drinks[${j}].at`));
+      else {
+        const seenDrinks = new Set();
+        evening.drinks.forEach((d, j) => {
+          checkIso(d?.at, `${at}.evening.drinks[${j}].at`);
+          if (typeof d?.id !== 'string' || !d.id) return;
+          if (seenDrinks.has(d.id)) add(`${at}.evening.drinks[${j}].id ${d.id} is not unique`);
+          seenDrinks.add(d.id);
+        });
+      }
       if (!Array.isArray(evening.dayContext)) add(`${at}.evening.dayContext is not an array`);
     }
     if (!morning || typeof morning !== 'object') add(`${at}.morning is missing`);
@@ -674,6 +731,8 @@ export function validateDoc(doc) {
       const where = `${at}.events[${j}]`;
       if (!ev || typeof ev !== 'object') { add(`${where} is not an object`); return; }
       if (typeof ev.id !== 'string' || !ev.id) add(`${where}.id is missing`);
+      else if (seenEvents.has(ev.id)) add(`${where}.id ${ev.id} is not unique`);
+      else seenEvents.add(ev.id);
       if (!EVENT_TYPES[ev.type]) add(`${where}.type ${JSON.stringify(ev.type)} is unknown`);
       const p = parseIso(ev.t);
       if (!p) { add(`${where}.t is not ISO-8601 with an offset`); return; }

@@ -139,11 +139,17 @@ export function chipGroup({ label, options, value, multi = false, exclusive = nu
    Native pickers (IMPLEMENTATION.md §1). An empty or unparseable value never
    overwrites the value already committed — handoff rule 5. */
 
+// composeIso returns null for a wall clock that does not exist on that date —
+// the hour a spring-forward skips, or an out-of-range typed value. Saying so
+// beside the field beats silently recording the hour after it.
+const NO_SUCH_TIME = 'This time doesn’t exist on that date. Check it.';
+
 export function timeField({ label, value, dates, onCommit, suggested, help, k = 'time' }) {
   const current = value ? parseIso(value) : null;
   const input = h('input', {
     type: 'time', k, 'aria-label': label, value: current ? current.time : '',
   });
+  const error = h('p', { class: 'field-error', role: 'alert' });
 
   // The model owns the 15:00 boundary; dates[1] is the calendar date a time
   // after midnight belongs to.
@@ -156,11 +162,19 @@ export function timeField({ label, value, dates, onCommit, suggested, help, k = 
 
   input.addEventListener('change', () => {
     const time = input.value.slice(0, 5);
-    const iso = /^\d{2}:\d{2}$/.test(time) ? composeIso(dateFor(time), time) : null;
-    if (!iso) {
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      // Cleared or half-entered: fall back to the last committed value.
       input.value = shown;
+      error.textContent = '';
       return;
     }
+    const iso = composeIso(dateFor(time), time);
+    // Keep what was typed on screen: coercing it would hide the problem.
+    if (!iso) {
+      error.textContent = NO_SUCH_TIME;
+      return;
+    }
+    error.textContent = '';
     shown = time;
     onCommit(iso);
   });
@@ -175,6 +189,7 @@ export function timeField({ label, value, dates, onCommit, suggested, help, k = 
   return h('div', { class: 'field' },
     h('span', { class: 'field-label', text: label }),
     h('div', { class: 'field-row' }, input),
+    error,
     hint,
     help ? h('p', { class: 'field-help', text: help }) : null);
 }
@@ -197,7 +212,11 @@ export function dateTimeField({ label, value, onCommit, preview, now = () => new
 
   const commit = () => {
     const iso = entered();
-    if (!iso) { error.textContent = 'Enter both a date and a time.'; return; }
+    if (!iso) {
+      const half = !dateInput.value || !timeInput.value;
+      error.textContent = half ? 'Enter both a date and a time.' : NO_SUCH_TIME;
+      return;
+    }
     if (parseIso(iso).ms > now().getTime()) { error.textContent = FUTURE; return; }
     error.textContent = '';
     onCommit(iso);
