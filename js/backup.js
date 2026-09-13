@@ -8,9 +8,10 @@
 //      confirmed, and then it lands as one whole-document write or not at all
 //      (B03/B05). A parse failure never puts the file's contents on screen.
 
+import { lastCompletedNightId } from './metrics.js';
 import {
   applyRestore, csvFileName, csvRows, csvText, dayLabelFor, daysSince,
-  exportFileName, isReviewed, nightIdFor, readBackup, restorePlan, shiftDate,
+  exportFileName, isReviewed, readBackup, restorePlan, shiftDate,
   stampLabelFor, toIso,
 } from './model.js';
 import { button, h, linkRow, notice, paint, savedStrip, title } from './ui.js';
@@ -40,7 +41,9 @@ export async function deliver({ text, name, type }) {
     document.body.append(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Revoking in the same task can cancel the download that click just
+    // started (Safari): give the navigation a turn of the event loop first.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     return { ok: true, how: 'downloaded' };
   } catch (err) {
     return { ok: false, error: err };
@@ -158,6 +161,15 @@ function preparedScreen(ctx, counts, redraw) {
     failed
       ? notice({ kind: 'error', title: 'No backup was created. Try again.', text: 'Your records are unchanged.' })
       : null,
+    // The write that records "yes, I saved it" can fail like any other (S01):
+    // say so here rather than leaving the tap looking ignored.
+    backup.error
+      ? notice({
+        kind: 'error',
+        title: backup.error,
+        text: 'The backup date on this phone has not moved. The file you saved is still fine.',
+      })
+      : null,
     cancelled
       ? notice({
         title: 'No new backup confirmed.',
@@ -223,6 +235,15 @@ function resetRestore() {
   restore.mode = 'add';
   restore.error = '';
   restore.result = null;
+}
+
+// The chosen file survives the round trip to Backup (B05) and nothing else:
+// the router calls this on every navigation, so coming back to Restore days
+// later opens on the file picker, not on someone else's half-finished replace.
+export function onRouteChange(hash) {
+  if (hash === '#/more/backup' || hash === '#/more/restore') return;
+  restore.keep = false;
+  resetRestore();
 }
 
 export function renderRestore(el, ctx) {
@@ -303,15 +324,16 @@ function previewScreen(ctx, redraw) {
   const local = ctx.store.get();
   const plan = restorePlan(local, restore.doc, 'add');
   restore.plan = plan;
-  const blocked = plan.conflicts.length > 0;
+  const blocked = plan.blocked;
 
   const rows = [
     ['File dates', plan.fromId ? `${dayLabelFor(plan.fromId)} – ${dayLabelFor(plan.toId)}` : 'No nights'],
     ['Nights in backup', String(plan.nights)],
     ['Routine records', String(plan.routines)],
     ['Already on this phone', `${plan.skipped} date${plan.skipped === 1 ? '' : 's'}`],
+    plan.collided ? ['Skipped, entry already here', `${plan.collided} night${plan.collided === 1 ? '' : 's'}`] : null,
     ['New dates', `${plan.added} night${plan.added === 1 ? '' : 's'}`],
-  ];
+  ].filter(Boolean);
 
   return [
     title({ overline: 'Nothing has changed yet', name: 'Review this backup' }),
@@ -321,7 +343,18 @@ function previewScreen(ctx, redraw) {
       ? notice({
         kind: 'error',
         title: 'This backup names a routine it does not contain.',
-        text: plan.conflicts[0].text + ' Nothing can be imported until that is fixed.',
+        text: plan.conflicts.find(c => c.reason === 'routine').text
+          + ' Nothing can be imported until that is fixed.',
+      })
+      : null,
+    // Named, not hidden: these dates are in the file and will not be added, so
+    // the preview says which ones before anything is tapped.
+    !blocked && plan.collided
+      ? notice({
+        kind: 'warm',
+        title: `${plan.collided} night${plan.collided === 1 ? '' : 's'} will be skipped because an `
+          + 'entry already exists on this phone.',
+        text: plan.collidedIds.map(dayLabelFor).join(' · '),
       })
       : null,
     plan.routineIssues.map(text => notice({ kind: 'warm', title: 'Routines', text })),
@@ -425,6 +458,10 @@ function doneScreen(ctx) {
     }),
     h('p', { class: 'lead', text: `There ${total === 1 ? 'is' : 'are'} now ${total} `
       + `night${total === 1 ? '' : 's'} on this phone.` }),
+    plan.collided
+      ? h('p', { class: 'small', text: `${plan.collided} night${plan.collided === 1 ? '' : 's'} skipped `
+        + `because an entry already exists on this phone: ${plan.collidedIds.map(dayLabelFor).join(' · ')}.` })
+      : null,
     plan.routinesAdded
       ? h('p', { class: 'small', text: `${plan.routinesAdded} routine record${plan.routinesAdded === 1 ? '' : 's'} came with them.` })
       : null,
@@ -442,7 +479,9 @@ const exportState = { fromId: null, toId: null, phase: 'idle', name: '', rows: 0
 // Shared with the summary sheet, so both open on the same range.
 export function exportRange(doc, now) {
   if (!exportState.fromId || !exportState.toId) {
-    const toId = nightIdFor(now);
+    // The night the clock is inside is still being lived, so the default range
+    // ends where Patterns ends — otherwise the same 28 days read as 29 here.
+    const toId = lastCompletedNightId(now);
     const first = doc.nights.length ? doc.nights[0].id : null;
     const fallback = shiftDate(toId, -27);
     exportState.toId = toId;
@@ -463,21 +502,42 @@ export function renderExport(el, ctx) {
 function exportScreen(ctx, redraw) {
   if (exportState.phase !== 'idle') return exportReady(ctx, redraw);
   const doc = ctx.store.get();
-  const count = csvRows(doc, exportState.fromId, exportState.toId).length - 1;
+
+  const countLine = () => {
+    if (exportState.fromId > exportState.toId) return 'Choose a range that runs forwards';
+    const count = csvRows(doc, exportState.fromId, exportState.toId).length - 1;
+    return `${count} night${count === 1 ? '' : 's'} in this range, one row each`;
+  };
+  const csvRow = linkRow({
+    label: 'Spreadsheet · CSV',
+    sub: countLine(),
+    onClick: () => prepareCsv(ctx, redraw),
+    k: 'csv',
+  });
+  const countNote = csvRow.querySelector('small');
+  const rangeError = h('div');
+
+  // Changing a date must not redraw this screen: the change event fires on the
+  // blur of the very tap that is landing on the CSV row, and a redraw would
+  // replace that row before the tap reached it. Only the two bits of text that
+  // depend on the range are rewritten.
+  const refresh = () => {
+    countNote.textContent = countLine();
+    rangeError.replaceChildren(...(exportState.fromId > exportState.toId
+      ? [notice({
+        kind: 'error',
+        title: 'The first date is after the last one.',
+        text: 'Choose a range that runs forwards.',
+      })]
+      : []));
+  };
 
   return [
     title({ overline: 'Export & summary', name: 'Take a copy' }),
-    rangeField('From', 'fromId', redraw),
-    rangeField('Through', 'toId', redraw),
-    exportState.fromId > exportState.toId
-      ? notice({ kind: 'error', title: 'The first date is after the last one.', text: 'Choose a range that runs forwards.' })
-      : null,
-    linkRow({
-      label: 'Spreadsheet · CSV',
-      sub: `${count} night${count === 1 ? '' : 's'} in this range, one row each`,
-      onClick: () => prepareCsv(ctx, redraw),
-      k: 'csv',
-    }),
+    rangeField('From', 'fromId', refresh),
+    rangeField('Through', 'toId', refresh),
+    rangeError,
+    csvRow,
     linkRow({ label: 'Full backup · JSON', sub: 'All dates and details', href: '#/more/backup', k: 'json' }),
     linkRow({ label: 'Printable summary', sub: 'Preview before saving or sharing', href: '#/summary', k: 'summary' }),
     notice({
@@ -488,12 +548,12 @@ function exportScreen(ctx, redraw) {
   ];
 }
 
-function rangeField(label, key, redraw) {
+function rangeField(label, key, onChange) {
   const input = h('input', { type: 'date', k: key, 'aria-label': label, value: exportState[key] ?? '' });
   input.addEventListener('change', () => {
     if (!input.value) { input.value = exportState[key] ?? ''; return; }
     exportState[key] = input.value;
-    redraw();
+    onChange();
   });
   return h('div', { class: 'field' },
     h('span', { class: 'field-label', text: label }),
@@ -522,7 +582,7 @@ function exportReady(ctx, redraw) {
       h('div', { class: 'field-value', text: exportState.name })),
     h('p', { class: 'lead', text: `${exportState.rows} nightly row${exportState.rows === 1 ? '' : 's'}. `
       + 'Missing answers are blank.' }),
-    failed ? notice({ kind: 'error', title: 'No file was created. Try again.', text: 'Your records are unchanged.' }) : null,
+    exportState.error ? notice({ kind: 'error', title: exportState.error, text: 'Your records are unchanged.' }) : null,
     cancelled ? notice({ title: 'Nothing was saved.', text: 'The share was cancelled; your records are unchanged.' }) : null,
     exportState.phase === 'sent'
       ? notice({ title: 'Handed to the share sheet.', text: NOT_VERIFIED })
@@ -541,8 +601,8 @@ function exportReady(ctx, redraw) {
 async function sendCsv(ctx, redraw) {
   const text = csvText(ctx.store.get(), exportState.fromId, exportState.toId);
   const result = await deliver({ text, name: exportState.name, type: 'text/csv' });
-  if (result.cancelled) exportState.phase = 'cancelled';
-  else if (!result.ok) exportState.phase = 'failed';
-  else exportState.phase = 'sent';
+  if (result.cancelled) { exportState.phase = 'cancelled'; exportState.error = ''; }
+  else if (!result.ok) { exportState.phase = 'failed'; exportState.error = 'No file was created. Try again.'; }
+  else { exportState.phase = 'sent'; exportState.error = ''; }
   redraw();
 }

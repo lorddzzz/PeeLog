@@ -14,6 +14,12 @@
 // `.c-axis`, `.c-label`. Shapes fill and stroke with `currentColor`, so app.css
 // sets `color` on those four classes and nothing here needs to know the
 // palette.
+//
+// The one thing imported here is a date formatter: a spoken sentence must not
+// read a night id out as digits (`2026-09-13`), and duplicating the month
+// names would be a second copy to keep in step with model.js.
+
+import { dayLabelFor } from './model.js';
 
 /* ── Geometry ───────────────────────────────────────────────────────────
    The coordinate space is 100 units wide and the <svg> is sized by CSS, so
@@ -225,7 +231,7 @@ function excludedText(excluded) {
 }
 
 function windowText(w, name) {
-  const range = w.fromId && w.toId ? ` (${w.fromId} to ${w.toId})` : '';
+  const range = w.fromId && w.toId ? ` (${dayLabelFor(w.fromId)} to ${dayLabelFor(w.toId)})` : '';
   return `${name}${range}: ${w.wet} wet of ${nights(w.reviewed)} reviewed`
     + `${w.rate === null ? '' : ` (${pct(w.rate)})`}.`;
 }
@@ -251,7 +257,7 @@ export function textEquivalent(result) {
           : '');
 
     case 'wetNightsByWeek':
-      return `Wet nights by week: ${r.weeks.map(w => `${w.fromId} ${w.wet} of ${w.reviewed} reviewed`).join('; ')}.`;
+      return `Wet nights by week: ${r.weeks.map(w => `week from ${dayLabelFor(w.fromId)}, ${w.wet} of ${w.reviewed} reviewed`).join('; ')}.`;
 
     case 'firstWetting':
       return (r.points.length

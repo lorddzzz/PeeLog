@@ -86,8 +86,15 @@ function nameField({ value, onCommit }) {
     type: 'text', k: 'name', 'aria-label': 'Routine name', value: value ?? '',
     placeholder: 'Earlier lights out', maxlength: '60', enterkeyhint: 'done',
   });
+  // Against the last committed value, not the one the field was built with:
+  // this form patches its text instead of re-rendering, so the node outlives
+  // several commits and clearing the name has to count as one.
+  let last = value ?? '';
   input.addEventListener('change', () => {
-    if (input.value.trim() !== (value ?? '')) onCommit(input.value.trim());
+    const next = input.value.trim();
+    if (next === last) return;
+    last = next;
+    onCommit(next);
   });
   return h('div', { class: 'field' },
     h('span', { class: 'field-label', text: 'Name' }),
@@ -118,15 +125,45 @@ export function renderNew(el, ctx) {
   return ctx.store.subscribe(redraw);
 }
 
+/* ── Patching, not redrawing ─────────────────────────────────────────────
+   A text or date field commits on the `change` event, which fires on the blur
+   of the tap that is already on its way to Save. Redrawing from that handler
+   replaces the button under the finger and the tap lands on nothing, so a
+   field only updates the draft and rewrites the one line of text that depends
+   on it. */
+
+// The error notice of a form, as a node that can be filled and emptied in
+// place while the form itself stays put.
+function errorSlot(state) {
+  const box = h('div');
+  const set = msg => {
+    state.error = msg;
+    box.replaceChildren(...(msg ? [notice({ kind: 'error', title: msg })] : []));
+  };
+  set(state.error);
+  return { box, set };
+}
+
 function createForm(ctx, redraw) {
   const doc = ctx.store.get();
   const open = openExperiment(doc);
-  // A replacement cannot overlap what it replaces (X04), so the current
-  // routine's last evening is the one before this routine's first.
-  const endsOn = draft.from ? prevNightId(draft.from) : null;
-  const overlaps = open && draft.from && draft.from <= open.from;
 
   if (draft.discard) return discardSheet(ctx, redraw);
+
+  const { box: errorBox, set: setError } = errorSlot(draft);
+  // The one line that depends on the name and the start date; both are typed
+  // fields, so it is rewritten rather than re-rendered.
+  const overlapText = h('p');
+  const refreshOverlap = () => {
+    if (!open) return;
+    // A replacement cannot overlap what it replaces (X04), so the current
+    // routine's last evening is the one before this routine's first.
+    overlapText.textContent = overlaps(open)
+      ? `“${open.name}” started on ${dayLabelFor(open.from)}. A new routine has to start after that.`
+      : `“${open.name}” ends on ${dayLabelFor(prevNightId(draft.from))}. `
+        + `“${draft.name || 'The new routine'}” starts on ${dayLabelFor(draft.from)}.`;
+  };
+  refreshOverlap();
 
   return [
     title({
@@ -134,30 +171,24 @@ function createForm(ctx, redraw) {
       name: 'Record a change',
       lead: 'A short name is enough to remember what changed.',
     }),
-    nameField({ value: draft.name, onCommit: v => { draft.name = v; draft.error = ''; redraw(); } }),
+    nameField({ value: draft.name, onCommit: v => { draft.name = v; setError(''); refreshOverlap(); } }),
     dateField({
       label: 'Starts with the night of',
       value: draft.from,
-      onCommit: v => { draft.from = v; draft.error = ''; redraw(); },
+      onCommit: v => { draft.from = v; setError(''); refreshOverlap(); },
       help: 'A date in the future is recorded as Scheduled.',
     }),
     textField({
       label: 'Note', value: draft.note, rows: 3,
       placeholder: 'What changed, in your own words',
-      onCommit: v => { draft.note = v; redraw(); },
+      onCommit: v => { draft.note = v; },
     }),
-    open ? notice({
-      title: 'One routine at a time',
-      text: overlaps
-        ? `“${open.name}” started on ${dayLabelFor(open.from)}. A new routine has to start after that.`
-        : `“${open.name}” ends on ${dayLabelFor(endsOn)}. “${draft.name || 'The new routine'}” `
-          + `starts on ${dayLabelFor(draft.from)}.`,
-    }) : null,
-    draft.error ? notice({ kind: 'error', title: draft.error }) : null,
+    open ? notice({ title: 'One routine at a time', children: [overlapText] }) : null,
+    errorBox,
     button({
       label: open ? 'End current and start new' : 'Save routine',
       kind: 'primary', k: 'save',
-      onClick: () => save(ctx, open, endsOn, overlaps, redraw),
+      onClick: () => save(ctx, open, setError),
     }),
     button({
       label: 'Cancel', kind: 'quiet', k: 'cancel',
@@ -182,24 +213,27 @@ function discardSheet(ctx, redraw) {
   );
 }
 
-function save(ctx, open, endsOn, overlaps, redraw) {
-  if (!draft.name.trim()) { draft.error = 'Give the change a short name.'; redraw(); return; }
-  if (!isDateStr(draft.from)) { draft.error = 'Choose the evening it starts with.'; redraw(); return; }
-  if (overlaps) {
-    draft.error = 'A new routine has to start after the current one began.';
-    redraw();
+// Read from the draft rather than from render time: the start date can change
+// after the form was built, because a field commit no longer redraws it.
+const overlaps = open => !!(open && draft.from && draft.from <= open.from);
+
+function save(ctx, open, setError) {
+  if (!draft.name.trim()) { setError('Give the change a short name.'); return; }
+  if (!isDateStr(draft.from)) { setError('Choose the evening it starts with.'); return; }
+  if (overlaps(open)) {
+    setError('A new routine has to start after the current one began.');
     return;
   }
 
   const exp = newExperiment(draft.name, draft.from, draft.note);
   const result = ctx.store.update(d => {
-    if (open) endExperiment(d, open.id, endsOn);
+    if (open) endExperiment(d, open.id, prevNightId(draft.from));
     d.experiments.push(exp);
     // Nights already recorded from the start evening onward join it now;
     // nights created later tag themselves through ensureNight.
     assignExperiment(d, exp);
   });
-  if (!result.ok) { draft.error = 'Not saved'; redraw(); return; }
+  if (!result.ok) { setError('Not saved'); return; }
   ctx.navigate(`#/routines/${exp.id}`);
 }
 
@@ -292,8 +326,8 @@ function comparisonBlock(doc, exp, now) {
     });
   }
   const groups = [
-    { key: 'before', label: `Before · ${result.before.fromId} – ${result.before.toId}`, ...result.before },
-    { key: 'during', label: `During · ${result.during.fromId} – ${result.during.toId}`, ...result.during },
+    { key: 'before', label: `Before · ${dayLabelFor(result.before.fromId)} – ${dayLabelFor(result.before.toId)}`, ...result.before },
+    { key: 'during', label: `During · ${dayLabelFor(result.during.fromId)} – ${dayLabelFor(result.during.toId)}`, ...result.during },
   ];
   const summary = textEquivalent(result);
   // charts.js hands back an SVG string, dropped into a labelled box the same
@@ -313,13 +347,14 @@ function comparisonBlock(doc, exp, now) {
 }
 
 function editForm(ctx, exp, redraw) {
+  const { box: errorBox, set: setError } = errorSlot(detail);
   return [
     title({ overline: 'Routines', name: 'Edit this routine' }),
-    nameField({ value: detail.name, onCommit: v => { detail.name = v; detail.error = ''; redraw(); } }),
+    nameField({ value: detail.name, onCommit: v => { detail.name = v; setError(''); } }),
     dateField({
       label: 'Starts with the night of',
       value: detail.from,
-      onCommit: v => { detail.from = v; detail.error = ''; redraw(); },
+      onCommit: v => { detail.from = v; setError(''); },
       help: 'Changing the start date moves which nights are compared.',
     }),
     // Only an ended routine has a last evening to correct; an ongoing one
@@ -327,16 +362,16 @@ function editForm(ctx, exp, redraw) {
     exp.to ? dateField({
       label: 'Last included evening',
       value: detail.to,
-      onCommit: v => { detail.to = v; detail.error = ''; redraw(); },
+      onCommit: v => { detail.to = v; setError(''); },
     }) : null,
     textField({
       label: 'Note', value: detail.note, rows: 3,
-      onCommit: v => { detail.note = v; redraw(); },
+      onCommit: v => { detail.note = v; },
     }),
-    detail.error ? notice({ kind: 'error', title: detail.error }) : null,
+    errorBox,
     button({
       label: 'Save changes', kind: 'primary', k: 'save-edit',
-      onClick: () => saveEdit(ctx, exp, redraw),
+      onClick: () => saveEdit(ctx, exp, setError, redraw),
     }),
     button({
       label: 'Cancel', kind: 'quiet', k: 'cancel-edit',
@@ -356,12 +391,11 @@ function editForm(ctx, exp, redraw) {
 // cannot gate a logging action.
 const confirmDiscard = () => confirm('Discard these changes to the routine?');
 
-function saveEdit(ctx, exp, redraw) {
-  if (!detail.name.trim()) { detail.error = 'Give the change a short name.'; redraw(); return; }
-  if (!isDateStr(detail.from)) { detail.error = 'Choose the evening it starts with.'; redraw(); return; }
+function saveEdit(ctx, exp, setError, redraw) {
+  if (!detail.name.trim()) { setError('Give the change a short name.'); return; }
+  if (!isDateStr(detail.from)) { setError('Choose the evening it starts with.'); return; }
   if (exp.to && (!isDateStr(detail.to) || detail.from > detail.to)) {
-    detail.error = 'The start has to come before the last included evening.';
-    redraw();
+    setError('The start has to come before the last included evening.');
     return;
   }
   const next = {
@@ -383,7 +417,8 @@ function saveEdit(ctx, exp, redraw) {
       if (night.experimentId === null) night.experimentId = activeExperiment(d, night.id)?.id ?? null;
     }
   });
-  if (!result.ok) { detail.error = 'Not saved'; redraw(); return; }
+  if (!result.ok) { setError('Not saved'); return; }
+  detail.error = '';
   detail.editing = false;
   redraw();
 }

@@ -874,11 +874,15 @@ export function csvEscape(value) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// The event columns count *recorded* events, which is not the same claim as
+// "this many things happened": a night nobody wrote events for reads 0 either
+// way, so the header has to say which one it is (O01, missing-data rules).
 export const CSV_COLUMNS = [
   'night', 'routine', 'wore',
   'dinner_at', 'evening_drinks', 'no_drinks', 'last_toilet_at', 'last_toilet_output',
   'lights_out_at', 'asleep_at', 'asleep_estimated', 'day_context', 'evening_note',
-  'events', 'asked_to_pee', 'lifts', 'night_drinks', 'wakes', 'wet_events',
+  'events_recorded', 'self_toilet_events_recorded', 'lift_events_recorded',
+  'drink_events_recorded', 'wake_events_recorded', 'wet_events_recorded',
   'first_wet_at', 'hours_after_asleep',
   'outcome', 'wake_at', 'changes', 'mood', 'sleep_signs', 'events_complete',
   'morning_note',
@@ -895,6 +899,15 @@ function hoursAfterAsleep(night) {
 
 const list = value => (Array.isArray(value) && value.length ? value.join('; ') : null);
 
+// An empty drinks array is only a zero once someone answered "none": before
+// that it is an unrecorded evening, and exporting it as 0 would read as a
+// confirmed no-drinks night (UX-HANDOFF O01).
+function drinkCount(evening) {
+  const drinks = evening?.drinks;
+  if (Array.isArray(drinks) && drinks.length) return drinks.length;
+  return evening?.noDrinks === true ? 0 : null;
+}
+
 // Raw values, not text: csvEscape turns them into fields, and the self-test
 // can assert what a note actually round-trips as.
 export function csvRows(doc, fromId, toId) {
@@ -907,7 +920,7 @@ export function csvRows(doc, fromId, toId) {
     const exp = (doc.experiments ?? []).find(e => e.id === night.experimentId) ?? null;
     rows.push([
       night.id, exp ? exp.name : null, night.diaper ?? null,
-      evening.dinnerAt ?? null, evening.drinks?.length ?? 0, evening.noDrinks ?? null,
+      evening.dinnerAt ?? null, drinkCount(evening), evening.noDrinks ?? null,
       evening.lastToiletAt ?? null, evening.lastToiletOutput ?? null,
       evening.lightsOutAt ?? null, evening.asleepAt ?? null,
       evening.asleepAt ? !!evening.asleepEstimated : null,
@@ -1106,13 +1119,28 @@ export function readBackup(text) {
 
 const idsOf = list => new Set((list ?? []).map(x => x?.id));
 
-// What a restore would do, computed before anything changes. `conflicts` is
-// what blocks it; `routineIssues` is what the preview should say out loud but
-// can live with.
+// Every id the local document already owns. Event ids address an event across
+// the whole document, so an incoming night carrying one of them cannot be
+// added beside it — the commonest way that happens is a boundary move here
+// that deleted the blank source night after the backup was taken.
+function ownedIds(doc) {
+  const events = new Set();
+  const drinks = new Set();
+  for (const night of doc?.nights ?? []) {
+    for (const ev of night?.events ?? []) if (ev?.id) events.add(ev.id);
+    for (const d of night?.evening?.drinks ?? []) if (d?.id) drinks.add(d.id);
+  }
+  return { events, drinks };
+}
+
+// What a restore would do, computed before anything changes. A `routine`
+// conflict is structural and blocks the whole file; an id conflict only costs
+// that one night, which add-missing skips and names in the preview.
 export function restorePlan(local, incoming, mode = 'add') {
   const localNights = idsOf(local?.nights);
   const localExp = idsOf(local?.experiments);
   const incomingExp = idsOf(incoming?.experiments);
+  const owned = ownedIds(local);
   const nights = incoming?.nights ?? [];
   const plan = {
     mode: mode === 'replace' ? 'replace' : 'add',
@@ -1123,8 +1151,11 @@ export function restorePlan(local, incoming, mode = 'add') {
     localNights: local?.nights?.length ?? 0,
     added: 0,
     skipped: 0,
+    collided: 0,
+    collidedIds: [],
     replaced: 0,
     routinesAdded: 0,
+    blocked: false,
     conflicts: [],
     routineIssues: [],
   };
@@ -1132,11 +1163,31 @@ export function restorePlan(local, incoming, mode = 'add') {
   const replacing = plan.mode === 'replace';
   if (replacing) plan.replaced = plan.localNights;
 
+  // A replace takes the file wholesale, so nothing it carries can collide
+  // with ids that are about to be thrown away.
+  const collisionIn = night => {
+    if (replacing) return null;
+    if ((night?.events ?? []).some(ev => ev?.id && owned.events.has(ev.id))) return 'event-id';
+    if ((night?.evening?.drinks ?? []).some(d => d?.id && owned.drinks.has(d.id))) return 'drink-id';
+    return null;
+  };
+
   const wanted = new Set();
   for (const night of nights) {
-    const isNew = replacing || !localNights.has(night.id);
-    if (isNew) plan.added++;
-    else { plan.skipped++; continue; }
+    if (!replacing && localNights.has(night.id)) { plan.skipped++; continue; }
+
+    const clash = collisionIn(night);
+    if (clash) {
+      plan.collided++;
+      plan.collidedIds.push(night.id);
+      plan.conflicts.push({
+        id: night.id,
+        reason: clash,
+        text: `The night of ${dayLabelFor(night.id)} holds an entry that is already on this phone.`,
+      });
+      continue;
+    }
+    plan.added++;
 
     const ref = night.experimentId ?? null;
     if (!ref) continue;
@@ -1147,9 +1198,10 @@ export function restorePlan(local, incoming, mode = 'add') {
     else if (!replacing && localExp.has(ref)) { /* already on this phone */ }
     else {
       plan.conflicts.push({
-        nightId: night.id,
+        id: night.id,
+        reason: 'routine',
         experimentId: ref,
-        text: `The night of ${night.id} names a routine that is missing from this backup.`,
+        text: `The night of ${dayLabelFor(night.id)} names a routine that is missing from this backup.`,
       });
     }
   }
@@ -1176,6 +1228,7 @@ export function restorePlan(local, incoming, mode = 'add') {
     }
   }
 
+  plan.blocked = plan.conflicts.some(c => c.reason === 'routine');
   return plan;
 }
 
@@ -1190,7 +1243,10 @@ function insertNight(draft, night) {
 export function applyRestore(local, incoming, mode = 'add') {
   if (!validateDoc(incoming).ok) return { error: RESTORE_MESSAGES.unreadable };
   const plan = restorePlan(local, incoming, mode);
-  if (plan.conflicts.length) return { error: plan.conflicts[0].text };
+  // Structural only: a night whose ids are already here is left out, not a
+  // reason to refuse the other nights in the file.
+  const blocking = plan.conflicts.find(c => c.reason === 'routine');
+  if (blocking) return { error: blocking.text };
 
   let next;
   if (plan.mode === 'replace') {
@@ -1209,8 +1265,9 @@ export function applyRestore(local, incoming, mode = 'add') {
       }
     }
     const known = idsOf(next.nights);
+    const collided = new Set(plan.collidedIds);
     for (const night of incoming.nights ?? []) {
-      if (!known.has(night.id)) insertNight(next, clone(night));
+      if (!known.has(night.id) && !collided.has(night.id)) insertNight(next, clone(night));
     }
   }
 

@@ -112,12 +112,12 @@ const NOTE_MAX = 400;
 let parentNote = '';
 
 export function render(el, ctx) {
-  const redraw = () => paint(el, screen(ctx, redraw));
+  const redraw = () => paint(el, screen(ctx));
   redraw();
   return ctx.store.subscribe(redraw);
 }
 
-function screen(ctx, redraw) {
+function screen(ctx) {
   const doc = ctx.store.get();
   const { fromId, toId } = exportRange(doc, ctx.now());
   const data = summaryData(doc, fromId, toId, ctx.now());
@@ -128,7 +128,15 @@ function screen(ctx, redraw) {
     placeholder: 'Anything you want the sheet to say',
   });
   note.value = parentNote;
-  note.addEventListener('change', () => { parentNote = note.value.trim(); redraw(); });
+  // The note's `change` fires on the blur of the tap that is already heading
+  // for Print. Redrawing here would replace that button before the tap landed,
+  // so only the sheet's own note block is rewritten.
+  const noteBlock = h('div', { class: 'parent-note' });
+  const paintNote = () => noteBlock.replaceChildren(...(parentNote
+    ? [h('h2', { text: 'Parent note' }), h('div', { class: 'note', text: parentNote })]
+    : []));
+  note.addEventListener('change', () => { parentNote = note.value.trim(); paintNote(); });
+  paintNote();
 
   return [
     title({
@@ -144,7 +152,7 @@ function screen(ctx, redraw) {
       label: 'Print / Save as PDF', kind: 'primary', icon: 'print', k: 'print',
       onClick: () => window.print(),
     }),
-    sheetFor(data),
+    sheetFor(data, noteBlock),
     linkRow({ label: 'Change the date range', href: '#/more/export', k: 'range' }),
     linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
@@ -172,7 +180,7 @@ function notes(items) {
       : h('li', { text: item }))));
 }
 
-function sheetFor(d) {
+function sheetFor(d, noteBlock) {
   const { wet, first, asked, noticed: seen, perNight, daytime, bowel, sleep } = d;
   const routineWindow = d.routineComparison;
 
@@ -265,8 +273,7 @@ function sheetFor(d) {
           ])
           : notes(['No routine change recorded in this period.']))),
 
-    parentNote ? h('h2', { text: 'Parent note' }) : null,
-    parentNote ? h('div', { class: 'note', text: parentNote }) : null,
+    noteBlock,
 
     h('footer', { class: 'foot' },
       h('p', { text: 'Parent-recorded observations only. Missing answers are omitted from the '

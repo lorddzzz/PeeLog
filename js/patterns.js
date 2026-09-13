@@ -243,8 +243,10 @@ function comparisonMetric({ heading, result, measure }) {
   const chartHtml = comparison({ groups: result.groups, measure, label: textEquivalent(result) });
   return metricBlock({
     heading,
-    value: `${result.eligible}`,
-    denom: `${nightsWord(result.eligible)} eligible for comparison`,
+    // The hero figure of a comparison is a sample size, not a measurement: a
+    // bare "28" under "Evening drinks" reads as 28 drinks.
+    value: nightsWord(result.eligible),
+    denom: 'Eligible for comparison',
     chartHtml,
     ariaLabel: textEquivalent(result),
     result,

@@ -11,7 +11,9 @@ import { render as renderPatterns } from './patterns.js';
 import {
   render as renderRoutines, renderDetail as renderRoutine, renderNew as renderRoutineNew,
 } from './routines.js';
-import { renderBackup, renderExport, renderRestore } from './backup.js';
+import {
+  onRouteChange as restoreRouteChange, renderBackup, renderExport, renderRestore,
+} from './backup.js';
 import {
   render as renderMore, renderAppearance, renderInstall, renderPrivacy, renderWelcome,
 } from './more.js';
@@ -154,13 +156,19 @@ const ctx = {
 let cleanup = null;
 
 function route() {
-  const hit = match(location.hash || '#/tonight');
+  const hash = location.hash || '#/tonight';
+  const hit = match(hash);
   if (!hit) {
     // An unknown or stale hash is not worth a dead screen at 3am.
     history.replaceState(null, '', '#/tonight');
     route();
     return;
   }
+
+  // A half-finished restore is not a place to come back to days later, so the
+  // screen that owns that draft is told where we went (B05 keeps only the trip
+  // to Backup and back).
+  restoreRouteChange(hash);
 
   if (cleanup) cleanup();
   cleanup = null;

@@ -907,9 +907,31 @@ export function runSelfTests() {
     assert(at('morning_note') === note, 'the note did not round-trip');
     assert(at('outcome') === '', 'an unreviewed night exported an outcome');
     assert(at('changes') === '0', 'a recorded zero came back blank');
-    assert(at('wet_events') === '1', 'the wet event was not counted');
+    assert(at('wet_events_recorded') === '1', 'the wet event was not counted');
     assert(at('hours_after_asleep') === '6.2', `first wetting was ${at('hours_after_asleep')}h, expected 6.2`);
     return 'Quoted, doubled, and read back identical · nulls blank · 0 stays 0';
+  });
+
+  // The difference an exported 0 hides: nobody recorded an evening at all, or
+  // someone answered "none". Only the second is a zero.
+  t('An unrecorded evening exports a blank drink count, a confirmed none exports 0', () => {
+    const doc = emptyDoc();
+    const quiet = ensureNight(doc, '2026-09-11');
+    const none = ensureNight(doc, '2026-09-12');
+    setNoDrinks(none.evening, true);
+    const two = ensureNight(doc, '2026-09-13');
+    addDrink(two.evening, newDrink('2026-09-13T19:30:00+02:00', 'cup'));
+
+    const [header, ...rows] = csvRows(doc, null, null);
+    const at = (i, name) => rows[i][header.indexOf(name)];
+    assert(at(0, 'evening_drinks') === null, `an unanswered evening exported ${JSON.stringify(at(0, 'evening_drinks'))}`);
+    assert(csvEscape(at(0, 'evening_drinks')) === '', 'the unknown drink count was not a blank cell');
+    assert(at(1, 'evening_drinks') === 0, 'a confirmed no-drinks night did not export 0');
+    assert(at(2, 'evening_drinks') === 1, 'a recorded drink was not counted');
+    assert(quiet.evening.drinks.length === 0 && two.evening.drinks.length === 1, 'csvRows changed the document');
+    assert(header.includes('wet_events_recorded') && !header.includes('wet_events'),
+      'the event columns are not named as counts of recorded events');
+    return 'Unknown blank · confirmed none 0 · one drink 1 · headers say "recorded"';
   });
 
   t('A file that is not a backup is refused without touching the log', () => {
@@ -962,7 +984,8 @@ export function runSelfTests() {
 
     const plan = restorePlan(local, incoming, 'add');
     assert(plan.conflicts.length === 1, `expected 1 conflict, got ${plan.conflicts.length}`);
-    assert(plan.conflicts[0].nightId === '2026-09-10', 'the conflict named the wrong night');
+    assert(plan.conflicts[0].id === '2026-09-10', 'the conflict named the wrong night');
+    assert(plan.blocked === true, 'a damaged routine reference did not block the plan');
 
     const result = applyRestore(local, incoming, 'add');
     assert(result.error, 'a damaged reference was applied anyway');
@@ -975,6 +998,50 @@ export function runSelfTests() {
     assert(!fixed.error, `the repaired backup still failed: ${fixed.error}`);
     assert(fixed.experiments.length === 1, 'the referenced routine was not imported');
     return 'Blocked, nothing applied, both documents unchanged · repaired file imports its routine';
+  });
+
+  // The boundary-move case: an event moved to another night, the blank source
+  // night was deleted here, and the backup still carries it with that event id.
+  // Adding it back would make one of the two unreachable, so that one night is
+  // skipped — and the rest of the file still lands.
+  t('A night whose entry is already here is skipped, not a reason to refuse the file', () => {
+    const local = emptyDoc();
+    const kept = ensureNight(local, '2026-09-12');
+    const moved = newEvent('wet', '2026-09-12T23:40:00+02:00');
+    moved.id = 'e-moved01';
+    insertEvent(kept, moved);
+    addDrink(kept.evening, newDrink('2026-09-12T19:00:00+02:00', 'cup'));
+    kept.evening.drinks[0].id = 'd-shared1';
+
+    const incoming = emptyDoc();
+    const source = ensureNight(incoming, '2026-09-10');
+    const same = newEvent('wet', '2026-09-10T23:40:00+02:00');
+    same.id = 'e-moved01';
+    insertEvent(source, same);
+    const drinkNight = ensureNight(incoming, '2026-09-11');
+    addDrink(drinkNight.evening, newDrink('2026-09-11T19:00:00+02:00', 'cup'));
+    drinkNight.evening.drinks[0].id = 'd-shared1';
+    ensureNight(incoming, '2026-09-09');
+
+    const plan = restorePlan(local, incoming, 'add');
+    assert(plan.blocked === false, 'an id collision was treated as a structural failure');
+    assert(plan.collided === 2, `expected 2 collided nights, got ${plan.collided}`);
+    assert(plan.collidedIds.join() === '2026-09-10,2026-09-11', `collided dates were ${plan.collidedIds.join()}`);
+    assert(plan.conflicts.map(c => c.reason).join() === 'event-id,drink-id',
+      `conflict reasons were ${plan.conflicts.map(c => c.reason).join()}`);
+    assert(plan.added === 1, `expected 1 addable night, got ${plan.added}`);
+
+    const next = applyRestore(local, incoming, 'add');
+    assert(!next.error, `the whole file was refused: ${next.error}`);
+    assert(next.nights.map(n => n.id).join() === '2026-09-09,2026-09-12', 'the wrong nights were merged');
+    assert(validateDoc(next).ok, 'the merged document does not validate');
+
+    // Replace takes the file wholesale, so nothing it carries can collide.
+    const replace = restorePlan(local, incoming, 'replace');
+    assert(replace.collided === 0 && replace.added === 3, 'replace skipped a night over an id it is about to drop');
+    const replaced = applyRestore(local, incoming, 'replace');
+    assert(!replaced.error && replaced.nights.length === 3, 'replace did not take the file wholesale');
+    return '2 nights skipped by event and drink id · the third added · replace unaffected';
   });
 
   t('A routine tags its own nights and no earlier ones', () => {

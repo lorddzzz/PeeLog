@@ -285,9 +285,15 @@ export function stepper({ label, value, min = 0, onChange, help }) {
 export function textField({ label, value, placeholder = '', rows = 3, onCommit, k = 'note' }) {
   const box = h('textarea', { rows, k, 'aria-label': label, placeholder });
   box.value = value ?? '';
+  // Compared against the last value this field committed, not the one it was
+  // built with: a screen that patches text instead of re-rendering keeps the
+  // same node, and clearing a note back to empty is still an answer.
+  let last = value ?? '';
   box.addEventListener('change', () => {
     const next = box.value.trim();
-    if (next !== (value ?? '')) onCommit(next);
+    if (next === last) return;
+    last = next;
+    onCommit(next);
   });
   return h('div', { class: 'field' }, h('span', { class: 'field-label', text: label }), box);
 }

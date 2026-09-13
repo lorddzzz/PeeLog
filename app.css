@@ -386,7 +386,7 @@ body.no-art .title-art img { display: none; }
 .field { margin: 16px 0; }
 .field-label { display: block; font-size: var(--size-secondary); margin-bottom: 8px; }
 .field-help { font-size: var(--size-meta); color: var(--secondary); margin: 7px 0 0; }
-.field-help .chip { min-height: 36px; margin-left: 6px; font-size: var(--size-meta); }
+.field-help .chip { min-height: 44px; margin-left: 6px; font-size: var(--size-meta); }
 .field-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .field-row input { flex: 1 1 130px; min-width: 0; }
 /* Kept beside the field, with the entered value still on screen (S01). */
