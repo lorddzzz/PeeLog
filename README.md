@@ -2,11 +2,12 @@
 
 A night-wetting tracker for one child, built for the person logging at 3am.
 Design and scope: [docs/DESIGN.md](docs/DESIGN.md).
+Build plan: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
 
 Visual design: [UX handoff](docs/UX-HANDOFF.md),
 [screen library](docs/ux/index.html), and [assets](docs/ux/ASSETS.md).
-These are design studies for the separate implementation phase. When serving
-locally, open `/docs/ux/` to browse all screens.
+These are design studies for the implementation phase. When serving locally,
+open `/docs/ux/` to browse all screens.
 
 **Status: M0** — app shell, PWA install, offline caching and an install-check
 screen. Taps on the Tonight screen are not recorded yet; that is M1.
