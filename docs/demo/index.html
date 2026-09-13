@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>PeeLog — Quiet company</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.7 8.7 0 1 0 10.7 10.7Z"/></symbol>
+      <symbol id="icon-toilet" viewBox="0 0 24 24"><path d="M5 4h5v8H5zM5 12h15c0 4-3 6-7 6H9c-2 0-4-2-4-6ZM10 18v3h6l-1-3M13 9h7"/></symbol>
+      <symbol id="icon-carry" viewBox="0 0 24 24"><circle cx="9" cy="5" r="2"/><path d="M5 21v-7c0-3 1-5 4-5l4 5h6M9 14v7M13 7l2 2 4-2M15 9l-2 4"/><circle cx="19" cy="4" r="1.5"/></symbol>
+      <symbol id="icon-water" viewBox="0 0 24 24"><path d="M6 5h12l-1.5 15h-9ZM7 11c3-2 6 2 10 0M10 2h4"/></symbol>
+      <symbol id="icon-wake" viewBox="0 0 24 24"><path d="M6 14a6 6 0 0 1 12 0M3 14h18M5 5l2 2M12 2v3M19 5l-2 2M6 18h12M9 21h6"/></symbol>
+      <symbol id="icon-drop" viewBox="0 0 24 24"><path d="M12 3c-2 4-7 8-7 12a7 7 0 0 0 14 0c0-4-5-8-7-12ZM9 16c0 1.5 1 2 2 2"/></symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M4 11h16M8 15h2M14 15h2M8 18h2"/></symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="m6 12 4 4 8-8"/></symbol>
+      <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="m8 5-5 5 5 5M3 10h10a6 6 0 0 1 0 12"/></symbol>
+    </defs>
+  </svg>
+
+  <main class="study">
+    <aside class="direction">
+      <p class="eyebrow">PEELOG / VISUAL STUDY 01</p>
+      <h1>Quiet company.</h1>
+      <p class="intro">A little warmth<br> for the middle of the night.</p>
+      <p class="description">The simplicity of a bedside tool, with the softness of a gentle companion. A small illustration keeps you company; the controls stay clear.</p>
+      <div class="palette" aria-label="Palette: midnight, blue slate, oatmeal, and clay">
+        <span style="--swatch:#10151e"></span><span style="--swatch:#252f40"></span><span style="--swatch:#d6c9ac"></span><span style="--swatch:#c69d89"></span>
+      </div>
+      <p class="palette-label">Midnight · blue slate · oatmeal · clay</p>
+      <div class="study-note"><span class="note-number">01</span><p><b>Warmth, kept quiet.</b><br>Soft texture and a sleepy moon. No glow or animation.</p></div>
+      <div class="study-note"><span class="note-number">02</span><p><b>Made for a tired thumb.</b><br>Five clear actions. One tap, then optional details.</p></div>
+      <p class="demo-label">Interactive visual demo · sample data<br>Try logging an event, adding detail, and Undo.<br>Demo entries disappear on reload.</p>
+    </aside>
+
+    <div class="phone-wrap">
+      <div class="phone">
+        <header class="app-header"><span class="brand"><svg aria-hidden="true"><use href="#icon-moon"/></svg>peelog</span><span class="night-mode">Night mode</span></header>
+        <section class="screen" id="tonight" aria-labelledby="tonight-title">
+          <div class="night-heading"><div><p class="overline">SUN, 13 SEPTEMBER</p><h2 id="tonight-title">Tonight</h2><p class="night-subtitle">One tap. Back to rest.</p></div><img class="bedtime-art" src="assets/bedtime-moon.png" alt="" width="210" height="140"></div>
+          <div class="night-context"><span class="quiet-dot"></span>Asleep at 20:45<span class="context-divider">·</span><span id="event-count">1 event</span></div>
+          <div class="action-grid" aria-label="Log a nighttime event">
+            <button class="event" data-event="selfToilet"><svg aria-hidden="true"><use href="#icon-toilet"/></svg><span>She asked to pee</span><small>On her own</small></button>
+            <button class="event" data-event="lift"><svg aria-hidden="true"><use href="#icon-carry"/></svg><span>I lifted her</span><small>To the toilet</small></button>
+            <button class="event" data-event="drink"><svg aria-hidden="true"><use href="#icon-water"/></svg><span>Water</span><small>Had a drink</small></button>
+            <button class="event" data-event="wake"><svg aria-hidden="true"><use href="#icon-wake"/></svg><span>Woke up</span><small>For another reason</small></button>
+            <button class="event wet" data-event="wet"><svg aria-hidden="true"><use href="#icon-drop"/></svg><span><span class="wet-title">Wet bed</span><small>Log it now. Details can wait.</small></span><span class="plus" aria-hidden="true">+</span></button>
+          </div>
+          <div class="saved-strip"><div class="saved-copy" role="status" aria-live="polite"><span class="saved-title"><svg aria-hidden="true"><use href="#icon-check"/></svg><span id="saved-title">Water · 23:40</span></span><span class="saved-subtitle" id="saved-subtitle">Last event · a sip</span></div><button class="undo" id="undo">Undo</button></div>
+          <section class="details" id="details" aria-label="Optional event details" hidden><div class="detail-heading"><span id="detail-title">Add a little detail?</span><button id="done">Done</button></div><div class="chips" id="chips"></div><p>Optional. Your demo event is already recorded.</p></section>
+          <button class="morning-link" id="morning-open"><span>Ready for the morning?</span><svg aria-hidden="true"><use href="#icon-arrow"/></svg></button>
+        </section>
+
+        <section class="screen other-screen" id="history" aria-labelledby="history-title" hidden>
+          <p class="overline">ONE NIGHT AT A TIME</p><h2 id="history-title">History</h2><p class="section-intro">A little context, when you have a moment.</p>
+          <div class="history-caption"><span>SEPTEMBER</span><span>Sample nights</span></div>
+          <div id="current-night" class="history-row"><span><b>Sun, 13 September</b><small id="history-events">1 event · night in progress</small></span><span class="outcome pending" id="history-outcome">Open</span></div>
+          <div class="history-row"><span><b>Sat, 12 September</b><small>Asked to pee · 03:15</small></span><span class="outcome">Dry</span></div>
+          <div class="history-row"><span><b>Fri, 11 September</b><small>1 wetting · 02:20</small></span><span class="outcome wet-outcome">Wet</span></div>
+          <div class="history-row"><span><b>Thu, 10 September</b><small>No nighttime events</small></span><span class="outcome">Dry</span></div>
+          <div class="history-row"><span><b>Wed, 9 September</b><small>Morning review missing</small></span><span class="outcome pending">Unconfirmed</span></div>
+          <p class="history-footnote">Every night is information.<br>No scores. No streaks.</p>
+        </section>
+
+        <section class="screen other-screen" id="more" aria-labelledby="more-title" hidden><p class="overline">YOUR BEDSIDE SPACE</p><h2 id="more-title">A little quieter</h2><p class="section-intro">Keep the warmth, or turn it down.</p><label class="setting"><span><b>Bedtime illustration</b><small>A quiet companion above the controls</small></span><input type="checkbox" id="show-art" checked></label><p class="history-footnote">This study explores the nighttime appearance.<br>Daytime appearance is still to be decided.</p><button class="reset" id="reset">Reset demo</button></section>
+
+        <section class="screen other-screen" id="morning" aria-labelledby="morning-title" hidden><p class="overline">MON, 14 SEPTEMBER</p><h2 id="morning-title">Morning check-in</h2><p class="section-intro">How was the night?</p><div class="morning-options"><button data-outcome="Dry"><svg aria-hidden="true"><use href="#icon-moon"/></svg>Dry night</button><button data-outcome="Wet"><svg aria-hidden="true"><use href="#icon-drop"/></svg>Wet night</button></div><p class="morning-feedback" id="morning-feedback" role="status">Choose an outcome to complete the demo night.</p><p class="history-footnote">Other details can wait.<br>Only the outcome is filled in.</p><button class="reset" id="back">Back to Tonight</button></section>
+
+        <nav class="tabbar" aria-label="Main navigation"><button data-screen="tonight" aria-current="page"><svg aria-hidden="true"><use href="#icon-moon"/></svg>Tonight</button><button data-screen="history"><svg aria-hidden="true"><use href="#icon-history"/></svg>History</button><button data-screen="more"><svg aria-hidden="true"><use href="#icon-more"/></svg>More</button></nav>
+        <div class="home-indicator" aria-hidden="true"></div>
+      </div>
+      <p class="phone-caption">A visual prototype, not the live log.</p>
+    </div>
+  </main>
+  <script src="demo.js"></script>
+</body>
+</html>
+

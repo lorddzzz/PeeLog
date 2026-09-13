@@ -2,6 +2,13 @@
 
 A night-wetting tracker for one child, built for the person logging at 3am.
 
+**Design handoff:** the approved visual direction and complete basic UX are now
+documented in [UX-HANDOFF.md](UX-HANDOFF.md), with a [screen atlas](ux/index.html)
+and [asset library](ux/ASSETS.md). That handoff supersedes this document's earlier
+visual and interaction proposals, and explicitly lists data-definition issues
+to reconcile during implementation. This file retains the original scope and
+technical background.
+
 ## 1. The problem, stated precisely
 
 We need enough structured data about nights to make three decisions with confidence:
