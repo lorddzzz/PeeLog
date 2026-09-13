@@ -223,7 +223,11 @@ function tonight(ctx, draw) {
     state.moveNote ? notice({ text: state.moveNote }) : null,
     reviewNotice(night),
     open ? detail(ctx, open, draw, { onDone: () => { state.openEventId = null; state.editingTime = false; draw(); } }) : null,
-    linkRow({ label: 'Ready for the morning?', href: `#/morning/${active.id}`, k: 'morning' }),
+    linkRow({
+      label: isReviewed(night) ? 'Morning review recorded' : 'Ready for the morning?',
+      href: `#/morning/${active.id}`,
+      k: 'morning',
+    }),
   ];
 }
 

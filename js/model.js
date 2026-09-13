@@ -141,6 +141,13 @@ export function timeLabelFor(iso) {
   return p ? p.time : '';
 }
 
+// 'peelog-2026-09-13.peelog.json' — the .peelog.json suffix is what
+// AGENTS.md's gitignore already matches, so an export sitting in the repo
+// directory can never be committed by accident.
+export function exportFileName(date) {
+  return `peelog-${isoDate(date.getFullYear(), date.getMonth() + 1, date.getDate())}.peelog.json`;
+}
+
 /* ── Field tables ───────────────────────────────────────────────────────
    Option wording comes from UX-HANDOFF §E01–E05, R01–R03. `short` is only
    set where the chip label would read wrong inside a one-line summary. */
@@ -467,6 +474,15 @@ export function nightForEvent(doc, eventId) {
 // morning.outcome !== null *is* reviewed — there is no separate flag to fall
 // out of sync with it.
 export const isReviewed = night => (night?.morning?.outcome ?? null) !== null;
+
+// Whether setting `outcome` on this night would silently override a wet event
+// already recorded. Only Dry can conflict; Wet never contradicts an event.
+// Returns the first conflicting wet event (in time order) so the screen can
+// link straight to it, or null when the outcome is safe to write.
+export function outcomeConflict(night, outcome) {
+  if (outcome !== 'dry' || !night) return null;
+  return night.events.find(e => e.type === 'wet') ?? null;
+}
 
 // Which night tonight's taps belong to, plus the older night still waiting for
 // a review. A stale active night must never absorb the new evening's events.

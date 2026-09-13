@@ -5,9 +5,10 @@
 import { createStore, STORE_KEY } from './store.js';
 import {
   activeNightFor, composeIso, dateForNightTime, dayDateFor, emptyDoc,
-  eventSummary, findNight, insertEvent, latestEvent, migrate, newEvent,
-  newNight, nightIdFor, nightIdForIso, openNight, parseIso, pendingReviewFor,
-  prevNightId, removeEvent, toIso, validateDoc,
+  eventSummary, exportFileName, findNight, insertEvent, isReviewed, latestEvent,
+  migrate, newEvent, newNight, nightIdFor, nightIdForIso, openNight,
+  outcomeConflict, parseIso, pendingReviewFor, prevNightId, removeEvent, toIso,
+  validateDoc,
 } from './model.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -422,6 +423,29 @@ export function runSelfTests() {
     const water = newEvent('drink', '2026-09-13T23:00:00+02:00');
     assert(eventSummary(water) === 'Water', eventSummary(water));
     return "'Wet bed · soaked' · 'She asked to pee · made it'";
+  });
+
+  t('A Dry outcome conflicts with a recorded wet event', () => {
+    const night = newNight('2026-09-13');
+    assert(outcomeConflict(night, 'dry') === null, 'no wet events still conflicted');
+    assert(isReviewed(night) === false, 'an unset outcome was reviewed');
+
+    const wet = newEvent('wet', '2026-09-14T02:12:00+02:00');
+    insertEvent(night, wet);
+    const conflict = outcomeConflict(night, 'dry');
+    assert(conflict && conflict.id === wet.id, 'the wet event was not returned as the conflict');
+    assert(outcomeConflict(night, 'wet') === null, 'Wet conflicted with its own wet event');
+
+    night.morning.outcome = 'dry';
+    assert(isReviewed(night), 'a dry outcome was not reviewed');
+    return 'dry + wet event conflicts; wet and no-events never do';
+  });
+
+  t('Export filename', () => {
+    const name = exportFileName(new Date(2026, 8, 13, 23, 59));
+    assert(name === 'peelog-2026-09-13.peelog.json', `unexpected name: ${name}`);
+    assert(name.endsWith('.peelog.json'), 'the gitignored suffix is missing');
+    return name;
   });
 
   t('The real document was not touched', () => {

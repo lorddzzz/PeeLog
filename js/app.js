@@ -3,9 +3,10 @@
 
 import { runChecks, renderChecks, runSelfTests } from './selftest.js';
 import { createStore } from './store.js';
-import { nightLabelFor } from './model.js';
-import { h, linkRow, paint, title } from './ui.js';
+import { exportFileName } from './model.js';
+import { linkRow, paint, title } from './ui.js';
 import { render as renderTonight, renderEvent } from './tonight.js';
+import { renderMorning } from './cards.js';
 
 export const VERSION = '0.2.0-m1';
 
@@ -64,14 +65,6 @@ function renderHistory(el) {
   ]);
 }
 
-function renderMorning(el, ctx) {
-  paint(el, [
-    title({ overline: 'Morning review', name: 'Not yet', lead: 'Morning review arrives next.' }),
-    h('p', { class: 'small', text: nightLabelFor(ctx.params.nightId) }),
-    linkRow({ label: 'Back to Tonight', href: '#/tonight' }),
-  ]);
-}
-
 /* ── Install check ──────────────────────────────────────────────────────
    Its markup stays in index.html and is moved in and out of the router's
    container, so its buttons keep their listeners across navigation. */
@@ -100,6 +93,25 @@ checkSection.querySelector('#persist').addEventListener('click', async () => {
 checkSection.querySelector('#update').addEventListener('click', async () => {
   await swReg?.update();
   location.reload();
+});
+
+// The escape hatch (IMPLEMENTATION.md §4, commit 1e): a bare JSON download,
+// no share sheet, no date range. Whether a blob: download has anywhere to go
+// in iOS standalone mode is unverified — see AGENTS.md "Done means verified".
+checkSection.querySelector('#export-json').addEventListener('click', () => {
+  const name = exportFileName(new Date());
+  const blob = new Blob([JSON.stringify(store.get(), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  const status = checkSection.querySelector('#export-status');
+  status.textContent = `Exported ${name}`;
+  status.hidden = false;
 });
 
 /* ── Router ─────────────────────────────────────────────────────────────
