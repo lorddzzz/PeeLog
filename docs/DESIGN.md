@@ -316,7 +316,8 @@ manifest.webmanifest
 icons/                app icons
 assets/  icons.svg  art/
 js/  app.js  store.js  model.js  ui.js  tonight.js  cards.js  history.js
-     metrics.js  charts.js  routines.js  backup.js  more.js  selftest.js
+     patterns.js  metrics.js  charts.js  routines.js  backup.js  summary.js
+     more.js  selftest.js  selftest-metrics.js
 tools/  make_sprite.py  make_art.py
 docs/  DESIGN.md  IMPLEMENTATION.md  UX-HANDOFF.md  VISUAL-DIRECTION.md  ux/  demo/
 ```

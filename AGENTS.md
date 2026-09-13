@@ -71,7 +71,8 @@ anything SW-related.
 
 Verify by actually driving it: load the page, click the thing, check the
 console is clean, read `localStorage` back after a reload. There is no test
-framework; the **Check** tab (`js/selftest.js`) is the closest thing to one, so
+framework; the self-test rows under **More → Install & offline** (`js/selftest.js`,
+`js/selftest-metrics.js`) are the closest thing to one, so
 extend it when you add something it should assert.
 
 After a service-worker or shell change, verify the update path too: reload

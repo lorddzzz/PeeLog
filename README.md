@@ -9,8 +9,12 @@ Visual design: [UX handoff](docs/UX-HANDOFF.md),
 These are design studies for the implementation phase. When serving locally,
 open `/docs/ux/` to browse all screens.
 
-**Status: M0** — app shell, PWA install, offline caching and an install-check
-screen. Taps on the Tonight screen are not recorded yet; that is M1.
+**Status: M5 built, awaiting on-phone verification.** Tonight logging with
+optional detail and undo, evening / morning / following-day cards, history
+with editing and backfill, patterns with hand-rolled charts, routines, backup
+and restore, CSV / JSON / printable summary, and a More screen that holds the
+install and self-test checks. What has not been verified on the actual iPhone
+is listed in [docs/IMPLEMENTATION.md §7](docs/IMPLEMENTATION.md).
 
 ## Privacy
 
@@ -34,7 +38,7 @@ Push to `main`. GitHub Pages serves the repo root; there is no build step.
 ## Install on the phone
 
 Safari → Share → **Add to Home Screen**, then launch from the icon. Open the
-**Check** tab, confirm the rows, then turn on Airplane Mode and relaunch from
+**More → Install & offline** screen, confirm the rows, then turn on Airplane Mode and relaunch from
 the icon. If the app opens with no network, the foundation works.
 
 ## Icons & art
