@@ -17,6 +17,7 @@ import {
   endExperiment, newExperiment, readBackup, restorePlan,
 } from './model.js';
 import { metricsSelfTests } from './selftest-metrics.js';
+import { h, paint } from './ui.js';
 import { summaryData } from './summary.js';
 
 const ok = (k, v) => ({ k, v, s: 'ok' });
@@ -1099,6 +1100,22 @@ export function runSelfTests() {
     assert(s.daytime.toilet.min === 6 && s.daytime.toilet.max === 6, 'toilet range is wrong');
     assert(daysSince('2026-09-11T09:00:00+02:00', new Date(2026, 8, 13, 9, 0)) === 2, 'daysSince miscounted');
     return '2 nights · 1 wet of 2 reviewed · median 4h · bowel read from the night before';
+  });
+
+  t('A redraw waits for an open time picker', () => {
+    // iOS commits on every wheel tick; the screen must not be rebuilt under
+    // the finger. Focus is stood in for, since taking real focus here would
+    // open a picker on the phone.
+    const el = h('div');
+    const input = h('input', { type: 'time', k: 'probe' });
+    el.append(input);
+    paint(el, [h('p', { text: 'first' })], input);
+    assert(el.firstChild === input, 'the focused picker was replaced');
+    paint(el, [h('p', { text: 'second' })], input);
+    assert(el.firstChild === input, 'a second redraw replaced the focused picker');
+    paint(el, [h('p', { text: 'third' })], null);
+    assert(el.firstChild?.textContent === 'third', 'an unfocused redraw did not paint');
+    return 'Held while focused, painted when not';
   });
 
   t('The real document was not touched', () => {

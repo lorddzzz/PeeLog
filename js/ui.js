@@ -306,11 +306,43 @@ export function checkbox({ label, checked, onChange, k = 'check' }) {
 
 /* ── Painting ───────────────────────────────────────────────────────────
    A screen redraws by replacing its children. Focus is carried across on the
-   data-k key so a re-render does not drop the control under a finger.  */
+   data-k key so a re-render does not drop the control under a finger.
 
-export function paint(el, nodes) {
-  const active = document.activeElement;
+   Except under an open native picker. iOS fires `change` on a time or date
+   input on every wheel tick while its popover is open (and once on opening,
+   if the field was empty), so every tick commits and asks for a redraw.
+   Replacing the input then tears the popover down mid-gesture and the focus
+   carry-over reopens it — the "blip". So while a picker inside `el` has focus,
+   the newest nodes are held and painted once it closes. */
+
+const pending = new WeakMap(); // el → { active, nodes }
+
+const isPicker = node =>
+  node instanceof HTMLInputElement && (node.type === 'time' || node.type === 'date');
+
+// `active` is a parameter only so the self-test can stand in for focus.
+export function paint(el, nodes, active = document.activeElement) {
+  if (active && el.contains(active) && isPicker(active)) {
+    const held = pending.get(el);
+    if (held && held.active === active) { held.nodes = nodes; return; }
+    pending.set(el, { active, nodes });
+    // A timeout, not the blur itself: when the finger moves straight to the
+    // next picker, its focus must land first so the paint defers to it
+    // instead of replacing it under the finger.
+    active.addEventListener('blur', () => setTimeout(() => flush(el), 0), { once: true });
+    return;
+  }
+  // A direct paint supersedes anything held for this element — the screen
+  // may have changed under it, and stale nodes must never land later.
+  pending.delete(el);
   const key = active && el.contains(active) ? active.dataset.k : null;
   el.replaceChildren(...[nodes].flat(6).filter(n => n !== null && n !== undefined && n !== false));
   if (key) el.querySelector(`[data-k="${CSS.escape(key)}"]`)?.focus();
+}
+
+function flush(el) {
+  const held = pending.get(el);
+  if (!held) return;
+  pending.delete(el);
+  paint(el, held.nodes);
 }
