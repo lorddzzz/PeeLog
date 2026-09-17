@@ -23,30 +23,18 @@ const answered = v => v !== null && v !== undefined;
 function daytimeSummary(nights) {
   const out = {
     days: 0,
-    urgency: { answered: 0, yes: 0 },
-    holding: { answered: 0, yes: 0 },
     accidents: { answered: 0, days: 0, total: 0 },
-    toilet: { answered: 0, min: null, max: null },
   };
+  // Only the two daytime questions still asked count as a daytime answer; a
+  // retired field left in an older record is not one.
   for (const night of nights) {
     const day = night.day ?? {};
-    if (!Object.values(day).some(answered)) continue;
+    if (!answered(day.accidents) && !answered(day.stool)) continue;
     out.days++;
-    for (const key of ['urgency', 'holding']) {
-      if (day[key] === true || day[key] === false) {
-        out[key].answered++;
-        if (day[key] === true) out[key].yes++;
-      }
-    }
     if (answered(day.accidents)) {
       out.accidents.answered++;
       out.accidents.total += day.accidents;
       if (day.accidents > 0) out.accidents.days++;
-    }
-    if (answered(day.toiletCount)) {
-      out.toilet.answered++;
-      out.toilet.min = out.toilet.min === null ? day.toiletCount : Math.min(out.toilet.min, day.toiletCount);
-      out.toilet.max = out.toilet.max === null ? day.toiletCount : Math.max(out.toilet.max, day.toiletCount);
     }
   }
   return out;
@@ -222,14 +210,9 @@ function sheetFor(d, noteBlock) {
         h('h2', { text: 'Daytime observations' }),
         notes([
           ['Days with daytime answers:', String(daytime.days)],
-          `Urgency reported on ${of(daytime.urgency.yes, daytime.urgency.answered)} days with an answer`,
-          `Holding reported on ${of(daytime.holding.yes, daytime.holding.answered)} days with an answer`,
-          `Accidents on ${of(daytime.accidents.days, daytime.accidents.answered)} days · `
+          `Accidents on ${of(daytime.accidents.days, daytime.accidents.answered)} days with an answer · `
             + `${daytime.accidents.total} in total`,
-          daytime.toilet.answered
-            ? `Toilet visits: ${daytime.toilet.min}–${daytime.toilet.max} per day, `
-              + `${daytime.toilet.answered} known days`
-            : 'Toilet visits: no record',
+          `Missing daytime answers: ${d.nights - daytime.days} nights`,
         ])),
       h('section', {},
         h('h2', { text: 'Bowel pattern' }),

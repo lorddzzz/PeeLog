@@ -315,7 +315,6 @@ function statusLine(night) {
 function eveningLine(night) {
   const ev = night.evening;
   const parts = [];
-  if (night.diaper) parts.push({ none: 'No diaper', 'pull-up': 'Pull-up', diaper: 'Diaper' }[night.diaper]);
   if (ev.dinnerAt) parts.push(`dinner ${timeLabelFor(ev.dinnerAt)}`);
   if (ev.noDrinks) parts.push('no drinks');
   else if (ev.drinks.length) parts.push(`${ev.drinks.length} drink${ev.drinks.length > 1 ? 's' : ''}`);
@@ -331,8 +330,6 @@ function morningLine(night) {
   const parts = [];
   if (m.outcome) parts.push(m.outcome === 'dry' ? 'Dry night' : 'Wet night');
   if (m.wakeAt) parts.push(`awake at ${timeLabelFor(m.wakeAt)}`);
-  // 0 is an answer; only null is unknown.
-  if (m.changes !== null) parts.push(`${m.changes} full change${m.changes === 1 ? '' : 's'}`);
   if (m.mood) parts.push(`mood ${m.mood}`);
   if (m.sleepSigns?.length) parts.push(`sleep signs: ${m.sleepSigns.join(', ')}`);
   if (m.eventsComplete) parts.push('night events complete');

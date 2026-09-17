@@ -10,7 +10,7 @@ import {
   insertEvent, isReviewed, isUntouchedNight, latestEvent, migrate,
   monthNightsWithGaps, moveEventTo, newDrink, newEvent, newNight, nightIdFor,
   nightIdForIso, nightStatus, openNight, outcomeConflict, parseIso,
-  pendingReviewFor, prevNightId, removeDrink, removeEvent, restoreNight,
+  pendingReviewFor, phaseFor, dayOwnerId, prevNightId, removeDrink, removeEvent, restoreNight,
   retypeEvent, setNoDrinks, stepValue, suggestedEveningTimes, toggleSleepSign,
   toIso, validateDoc,
   applyRestore, assignExperiment, csvEscape, csvRows, csvText, daysSince,
@@ -418,10 +418,9 @@ export function runSelfTests() {
       return isUntouchedNight(n);
     };
     assert(touch(n => insertEvent(n, newEvent('wet', '2026-09-14T02:12:00+02:00'))) === false, 'an event');
-    assert(touch(n => { n.diaper = 'none'; }) === false, 'diaper: none is an answer');
     assert(touch(n => { n.experimentId = 'x-1'; }) === false, 'an assigned routine');
     assert(touch(n => { n.morning.outcome = 'dry'; }) === false, 'a recorded outcome');
-    assert(touch(n => { n.morning.changes = 0; }) === false, 'an answered 0');
+    assert(touch(n => { n.day.accidents = 0; }) === false, 'an answered 0');
     assert(touch(n => { n.evening.asleepEstimated = true; }) === false, 'an estimated flag');
     assert(touch(n => { n.evening.note = 'late nap'; }) === false, 'a note');
     assert(touch(n => { n.evening.dayContext = ['nap']; }) === false, 'a day context');
@@ -505,8 +504,10 @@ export function runSelfTests() {
     assert(night.evening.noDrinks === null && night.morning.eventsComplete === null, 'later fields were not filled in');
     assert(night.day && night.day.stool === null, 'the day block was not filled in');
     assert(Array.isArray(night.evening.drinks) && night.evening.drinks.length === 0, 'drinks were not filled in');
-    assert(night.morning.changes === 0, 'an answered 0 was overwritten by the default');
-    return 'v2 refused · v1 filled in · answered values kept';
+    // morning.changes is no longer asked, but an older document still holds
+    // it — a restore must carry it through untouched, not drop or default it.
+    assert(night.morning.changes === 0, 'a value of a field no longer asked was dropped');
+    return 'v2 refused · v1 filled in · answered values kept, retired fields too';
   });
 
   t('Validation refuses a bad restore file', () => {
@@ -890,11 +891,15 @@ export function runSelfTests() {
     const night = ensureNight(doc, '2026-09-13');
     const note = 'wet, "soaked"\nand upset';
     night.morning.note = note;
-    night.morning.changes = 0;
+    night.day.accidents = 0;
     night.evening.asleepAt = '2026-09-13T20:00:00+02:00';
     const ev = newEvent('wet', '2026-09-14T02:12:00+02:00');
     ev.id = 'e-csv001';
+    ev.changed = ['sheets'];
     insertEvent(night, ev);
+    const dry = newEvent('wet', '2026-09-14T04:00:00+02:00');
+    dry.id = 'e-csv002';
+    insertEvent(night, dry);
 
     assert(csvEscape(note) === '"wet, ""soaked""\nand upset"', 'the note was not quoted per RFC 4180');
     assert(csvEscape(null) === '', 'a null field is not blank');
@@ -907,8 +912,10 @@ export function runSelfTests() {
     assert(back.length === 2, `expected one night row, got ${back.length - 1}`);
     assert(at('morning_note') === note, 'the note did not round-trip');
     assert(at('outcome') === '', 'an unreviewed night exported an outcome');
-    assert(at('changes') === '0', 'a recorded zero came back blank');
-    assert(at('wet_events_recorded') === '1', 'the wet event was not counted');
+    assert(at('day_accidents') === '0', 'a recorded zero came back blank');
+    assert(at('changes_recorded') === '1', `changes_recorded was ${at('changes_recorded')}, expected 1 — only the entry with something changed`);
+    assert(header.indexOf('changes') === -1 && header.indexOf('wore') === -1, 'a retired column is still exported');
+    assert(at('wet_events_recorded') === '2', 'the wet events were not counted');
     assert(at('hours_after_asleep') === '6.2', `first wetting was ${at('hours_after_asleep')}h, expected 6.2`);
     return 'Quoted, doubled, and read back identical · nulls blank · 0 stays 0';
   });
@@ -1073,8 +1080,7 @@ export function runSelfTests() {
     first.morning.outcome = 'dry';
     first.morning.sleepSigns = ['snoring'];
     first.day.stool = 'hard';
-    first.day.urgency = true;
-    first.day.toiletCount = 6;
+    first.day.accidents = 2;
 
     const second = ensureNight(doc, '2026-09-11');
     second.morning.outcome = 'wet';
@@ -1096,10 +1102,31 @@ export function runSelfTests() {
     // the daytime preceding 09-11 — one recorded answer, not two.
     assert(s.bowel.recorded === 1 && s.bowel.counts.hard === 1, 'the bowel tally is off by a night');
     assert(s.sleep.answered === 1 && s.sleep.snoring === 1, 'sleep signs lost their denominator');
-    assert(s.daytime.days === 1 && s.daytime.urgency.yes === 1, 'daytime answers counted wrong');
-    assert(s.daytime.toilet.min === 6 && s.daytime.toilet.max === 6, 'toilet range is wrong');
+    assert(s.daytime.days === 1 && s.daytime.accidents.days === 1 && s.daytime.accidents.total === 2, 'daytime answers counted wrong');
     assert(daysSince('2026-09-11T09:00:00+02:00', new Date(2026, 8, 13, 9, 0)) === 2, 'daysSince miscounted');
     return '2 nights · 1 wet of 2 reviewed · median 4h · bowel read from the night before';
+  });
+
+  t('Tonight reads its phase off the record, then the clock', () => {
+    const at = (h, m = 0) => new Date(2026, 8, 13, h, m);
+    const n = newNight('2026-09-13');
+    assert(phaseFor(n, at(20)) === 'evening', 'a blank evening at 20:00');
+    assert(phaseFor(n, at(23, 29)) === 'evening', '23:29 is still evening without an asleep time');
+    assert(phaseFor(n, at(23, 30)) === 'night', '23:30 with nothing tapped is night');
+    assert(phaseFor(n, at(3)) === 'night', '03:00 with nothing tapped is night');
+    assert(phaseFor(n, at(9, 59)) === 'night', '09:59 is still night');
+    assert(phaseFor(n, at(10)) === 'day', '10:00 with nothing tapped is day');
+    assert(phaseFor(n, at(14, 30)) === 'day', 'day runs up to the 15:00 boundary');
+    assert(phaseFor(n, at(15)) === 'evening', '15:00 is the next evening');
+    n.evening.asleepAt = '2026-09-13T20:45:00+02:00';
+    assert(phaseFor(n, at(21)) === 'night', 'an asleep time makes it night');
+    assert(phaseFor(n, at(11)) === 'day', 'the morning clock wins over a missing wake tap');
+    n.morning.wakeAt = '2026-09-14T06:30:00+02:00';
+    assert(phaseFor(n, at(6, 45)) === 'day', 'a wake time makes it day whatever the clock says');
+    assert(phaseFor(null, at(20)) === 'evening', 'no record at all is a blank evening');
+    assert(dayOwnerId(at(8)) === '2026-09-12', `08:00 on the 13th belongs to the night of the 12th, got ${dayOwnerId(at(8))}`);
+    assert(dayOwnerId(at(17)) === '2026-09-12', `17:00 on the 13th still belongs to the night of the 12th, got ${dayOwnerId(at(17))}`);
+    return 'Record first; 23:30–10:00 falls back to night, 10:00–15:00 to day';
   });
 
   t('A redraw waits for an open time picker', () => {

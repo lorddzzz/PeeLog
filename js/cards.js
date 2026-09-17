@@ -120,7 +120,7 @@ function morning(ctx, draw) {
   const night = findNight(ctx.store.get(), id);
   const wetEvents = (night?.events ?? []).filter(e => e.type === 'wet');
   const outcome = night?.morning?.outcome ?? null;
-  const m = night?.morning ?? { wakeAt: null, changes: null, mood: null, sleepSigns: null, eventsComplete: null, note: '' };
+  const m = night?.morning ?? { wakeAt: null, mood: null, sleepSigns: null, eventsComplete: null, note: '' };
 
   return [
     title({
@@ -139,11 +139,6 @@ function morning(ctx, draw) {
     timeField({
       label: 'Woke at', value: m.wakeAt, dates: dayDateFor(id), k: 'wake',
       onCommit: iso => writeMorningDetail(ctx, morn => { morn.wakeAt = iso; }, draw),
-    }),
-    stepper({
-      label: 'Full changes', value: m.changes, min: 0,
-      help: 'Sheets or clothes; leave blank if unknown.',
-      onChange: v => writeMorningDetail(ctx, morn => { morn.changes = v; }, draw),
     }),
     chipGroup({
       label: MORNING_FIELDS.mood.label, name: 'mood', options: MORNING_FIELDS.mood.options, value: m.mood,
@@ -303,11 +298,6 @@ function evening(ctx, draw) {
       name: 'Evening',
       lead: 'Before the night starts. Everything here can wait.',
     }),
-    chipGroup({
-      label: EVENING_FIELDS.diaper.label, name: 'diaper', options: EVENING_FIELDS.diaper.options,
-      value: night?.diaper ?? null,
-      onChange: v => writeEvening(ctx, n => { n.diaper = v; }, draw),
-    }),
     timeField({
       label: 'Dinner', value: ev.dinnerAt, dates, k: 'dinner', suggested: suggested.dinnerAt,
       onCommit: iso => writeEvening(ctx, n => { n.evening.dinnerAt = iso; }, draw),
@@ -432,9 +422,7 @@ export function renderDay(el, ctx) {
 function day(ctx, draw) {
   const id = dayState.nightId;
   const night = findNight(ctx.store.get(), id);
-  const d = night?.day ?? {
-    toiletCount: null, urgency: null, holding: null, accidents: null, stool: null, fluids: null,
-  };
+  const d = night?.day ?? { accidents: null, stool: null };
   const dayDate = dayDateFor(id);
 
   return [
@@ -444,29 +432,12 @@ function day(ctx, draw) {
       lead: 'Daytime notes for the day after this night, kept separate from the night itself.',
     }),
     stepper({
-      label: DAY_FIELDS.toiletCount.label, value: d.toiletCount, min: 0,
-      onChange: v => writeDay(ctx, n => { n.day.toiletCount = v; }, draw),
-    }),
-    chipGroup({
-      label: DAY_FIELDS.urgency.label, name: 'urgency', options: DAY_FIELDS.urgency.options, value: d.urgency,
-      onChange: v => writeDay(ctx, n => { n.day.urgency = v; }, draw),
-    }),
-    chipGroup({
-      label: DAY_FIELDS.holding.label, name: 'holding', options: DAY_FIELDS.holding.options, value: d.holding,
-      help: DAY_FIELDS.holding.hint,
-      onChange: v => writeDay(ctx, n => { n.day.holding = v; }, draw),
-    }),
-    stepper({
       label: DAY_FIELDS.accidents.label, value: d.accidents, min: 0,
       onChange: v => writeDay(ctx, n => { n.day.accidents = v; }, draw),
     }),
     chipGroup({
       label: DAY_FIELDS.stool.label, name: 'stool', options: DAY_FIELDS.stool.options, value: d.stool,
       onChange: v => writeDay(ctx, n => { n.day.stool = v; }, draw),
-    }),
-    chipGroup({
-      label: DAY_FIELDS.fluids.label, name: 'fluids', options: DAY_FIELDS.fluids.options, value: d.fluids,
-      onChange: v => writeDay(ctx, n => { n.day.fluids = v; }, draw),
     }),
     detailNote(dayState),
     button({

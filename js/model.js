@@ -258,16 +258,11 @@ export const EVENT_TYPES = {
 // UI should depend on that.
 export const EVENT_ORDER = ['selfToilet', 'lift', 'drink', 'wake', 'wet'];
 
+// Fields no longer asked (night.diaper, morning.changes, day.toiletCount,
+// day.urgency, day.holding, day.fluids) are left exactly as they are in a
+// stored document: migrate keeps unknown keys, nothing reads them, and a
+// restore of an older backup carries them along untouched.
 export const EVENING_FIELDS = {
-  // Stored on the night, not inside evening — the evening card edits it.
-  diaper: {
-    key: 'diaper', label: 'What she wore', kind: 'single',
-    options: [
-      { value: 'none', label: 'None' },
-      { value: 'pull-up', label: 'Pull-up' },
-      { value: 'diaper', label: 'Diaper' },
-    ],
-  },
   drinkSize: {
     key: 'size', label: 'Amount', kind: 'single',
     options: [
@@ -298,7 +293,6 @@ export const MORNING_FIELDS = {
       { value: 'wet', label: 'Wet night' },
     ],
   },
-  changes: { key: 'changes', label: 'Full changes', kind: 'count', min: 0 },
   mood: {
     key: 'mood', label: 'Mood', kind: 'single',
     options: [
@@ -319,12 +313,6 @@ export const MORNING_FIELDS = {
 };
 
 export const DAY_FIELDS = {
-  toiletCount: { key: 'toiletCount', label: 'Toilet visits', kind: 'count', min: 0 },
-  urgency: { key: 'urgency', label: 'Urgency', kind: 'single', options: yesNo() },
-  holding: {
-    key: 'holding', label: 'Holding', kind: 'single', options: yesNo(),
-    hint: 'Crossing legs or squatting to hold pee',
-  },
   accidents: { key: 'accidents', label: 'Daytime accidents', kind: 'count', min: 0 },
   stool: {
     key: 'stool', label: 'Stool', kind: 'single',
@@ -333,14 +321,6 @@ export const DAY_FIELDS = {
       { value: 'hard', label: 'Hard' },
       { value: 'normal', label: 'Normal' },
       { value: 'loose', label: 'Loose' },
-    ],
-  },
-  fluids: {
-    key: 'fluids', label: 'Fluids', kind: 'single',
-    options: [
-      { value: 'low', label: 'Low' },
-      { value: 'normal', label: 'Normal' },
-      { value: 'high', label: 'High' },
     ],
   },
 };
@@ -370,7 +350,6 @@ export function emptyDoc() {
 export function newNight(id) {
   return {
     id,
-    diaper: null,
     experimentId: null,
     evening: {
       dinnerAt: null,
@@ -388,19 +367,14 @@ export function newNight(id) {
     morning: {
       outcome: null,
       wakeAt: null,
-      changes: null,
       mood: null,
       sleepSigns: null,
       eventsComplete: null,
       note: '',
     },
     day: {
-      toiletCount: null,
-      urgency: null,
-      holding: null,
       accidents: null,
       stool: null,
-      fluids: null,
     },
   };
 }
@@ -576,7 +550,7 @@ export function nightForEvent(doc, eventId) {
 // night that never happened, which then asks to be reviewed.
 export function isUntouchedNight(night) {
   if (!night || night.events?.length) return false;
-  if ((night.diaper ?? null) !== null || (night.experimentId ?? null) !== null) return false;
+  if ((night.experimentId ?? null) !== null) return false;
   const fresh = newNight(night.id);
   return ['evening', 'morning', 'day'].every(block => {
     const got = night[block] ?? {};
@@ -640,6 +614,38 @@ export function suggestedEveningTimes(doc, nightId) {
     lightsOutAt: remap(prev?.evening?.lightsOutAt ?? null),
     asleepAt: remap(prev?.evening?.asleepAt ?? null),
   };
+}
+
+/* ── Phase ──────────────────────────────────────────────────────────────
+   Tonight is one grid in three states, and the state is read off the
+   night's own record rather than stored: nothing new to migrate, and the
+   screen can never disagree with the data. The record wins where it says
+   something; the clock only fills in what nobody tapped — a 01:00 Wet bed
+   must not be stuck behind a Fell asleep tap that never happened. */
+
+export const PHASES = ['evening', 'night', 'day'];
+
+// Minutes past midnight, on the wall clock the tap happens in.
+const NIGHT_FALLBACK_FROM = 23 * 60 + 30; // 23:30 with no asleep time reads as night
+const DAY_FALLBACK_FROM = 10 * 60;        // 10:00 with no wake time reads as day
+
+export function phaseFor(night, now = new Date()) {
+  if ((night?.morning?.wakeAt ?? null) !== null) return 'day';
+  const mins = now.getHours() * 60 + now.getMinutes();
+  // Day runs until the 15:00 night boundary: the next evening does not exist
+  // yet, so there is nothing else 14:30 could be.
+  if (mins >= DAY_FALLBACK_FROM && mins < NIGHT_START_HOUR * 60) return 'day';
+  if ((night?.evening?.asleepAt ?? null) !== null) return 'night';
+  if (mins >= NIGHT_FALLBACK_FROM || mins < DAY_FALLBACK_FROM) return 'night';
+  return 'evening';
+}
+
+// The night whose `day` block is today's daytime: today's calendar date is
+// the morning after the night dated yesterday. Asked by the clock, not by
+// which night is open, so a 17:00 stool lands on last night's day rather
+// than on the evening that has just begun.
+export function dayOwnerId(now = new Date()) {
+  return shiftDate(isoDate(now.getFullYear(), now.getMonth() + 1, now.getDate()), -1);
 }
 
 /* ── History (H01–H06) ──────────────────────────────────────────────────
@@ -878,16 +884,16 @@ export function csvEscape(value) {
 // "this many things happened": a night nobody wrote events for reads 0 either
 // way, so the header has to say which one it is (O01, missing-data rules).
 export const CSV_COLUMNS = [
-  'night', 'routine', 'wore',
+  'night', 'routine',
   'dinner_at', 'evening_drinks', 'no_drinks', 'last_toilet_at', 'last_toilet_output',
   'lights_out_at', 'asleep_at', 'asleep_estimated', 'day_context', 'evening_note',
   'events_recorded', 'self_toilet_events_recorded', 'lift_events_recorded',
   'drink_events_recorded', 'wake_events_recorded', 'wet_events_recorded',
   'first_wet_at', 'hours_after_asleep',
-  'outcome', 'wake_at', 'changes', 'mood', 'sleep_signs', 'events_complete',
+  'changes_recorded',
+  'outcome', 'wake_at', 'mood', 'sleep_signs', 'events_complete',
   'morning_note',
-  'day_date', 'day_toilet_count', 'day_urgency', 'day_holding', 'day_accidents',
-  'day_stool', 'day_fluids',
+  'day_date', 'day_accidents', 'day_stool',
 ];
 
 function hoursAfterAsleep(night) {
@@ -898,6 +904,14 @@ function hoursAfterAsleep(night) {
 }
 
 const list = value => (Array.isArray(value) && value.length ? value.join('; ') : null);
+
+// A full change is read off the wet events rather than asked again in the
+// morning: every wet entry where sheets or pyjamas were changed is one. Like
+// the event counts, this counts what was *recorded*, so the column says so.
+export function changesRecorded(night) {
+  return (night?.events ?? [])
+    .filter(e => e?.type === 'wet' && Array.isArray(e.changed) && e.changed.length).length;
+}
 
 // An empty drinks array is only a zero once someone answered "none": before
 // that it is an unrecorded evening, and exporting it as 0 would read as a
@@ -919,7 +933,7 @@ export function csvRows(doc, fromId, toId) {
     const counts = eventCounts(night);
     const exp = (doc.experiments ?? []).find(e => e.id === night.experimentId) ?? null;
     rows.push([
-      night.id, exp ? exp.name : null, night.diaper ?? null,
+      night.id, exp ? exp.name : null,
       evening.dinnerAt ?? null, drinkCount(evening), evening.noDrinks ?? null,
       evening.lastToiletAt ?? null, evening.lastToiletOutput ?? null,
       evening.lightsOutAt ?? null, evening.asleepAt ?? null,
@@ -927,12 +941,11 @@ export function csvRows(doc, fromId, toId) {
       list(evening.dayContext), evening.note || null,
       night.events?.length ?? 0, counts.selfToilet, counts.lift, counts.drink,
       counts.wake, counts.wet,
-      firstWetTime(night), hoursAfterAsleep(night),
-      morning.outcome ?? null, morning.wakeAt ?? null, morning.changes ?? null,
+      firstWetTime(night), hoursAfterAsleep(night), changesRecorded(night),
+      morning.outcome ?? null, morning.wakeAt ?? null,
       morning.mood ?? null, list(morning.sleepSigns), morning.eventsComplete ?? null,
       morning.note || null,
-      dayDateFor(night.id), day.toiletCount ?? null, day.urgency ?? null,
-      day.holding ?? null, day.accidents ?? null, day.stool ?? null, day.fluids ?? null,
+      dayDateFor(night.id), day.accidents ?? null, day.stool ?? null,
     ]);
   }
   return rows;
