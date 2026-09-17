@@ -56,6 +56,11 @@ Don't start the next milestone while the current one is unverified. Data we
 fail to collect tonight cannot be reconstructed later, so shipping something
 usable beats shipping something complete.
 
+Commit every time a meaningful unit of work is done and verified — a fix, a
+field, a screen — with a message that says why, not what. Push `main` when a
+task, feature or improvement is finished, since pushing is the deploy. Never
+leave finished work sitting uncommitted or a finished task unpushed.
+
 ## Done means verified
 
 Done = produced **and** verified against the real thing, not from a diff, a
