@@ -265,6 +265,36 @@ body.no-art .title-art img { display: none; }
 .action.wet small { color: #C0AAA1; }
 .action.wet .plus { margin-left: auto; }
 
+/* A phase change — Fell asleep, She's up — is an action like the others,
+   but wide and marked, because it is the one tap that changes which grid
+   is on screen. Compact is the same step offered again while its stamp is
+   missing (night entered by the clock, not a tap). */
+.action.transition {
+  grid-column: 1 / -1;
+  min-height: 72px;
+  flex-direction: row;
+  align-items: center;
+  border-color: var(--accent);
+}
+.action.transition .ico { color: var(--accent); }
+.action.compact {
+  grid-column: 1 / -1;
+  min-height: 56px;
+  flex-direction: row;
+  align-items: center;
+  background: none;
+  font-size: var(--size-secondary);
+}
+.action.stamped { background: var(--raised); }
+
+/* Evening · Night · Day — shows the phase the record puts the screen in,
+   and switches it for this visit. */
+.phase { margin: 2px 0 14px; }
+/* Stool and accidents sit under the grid as full-width rows. */
+.grid .day-rows { grid-column: 1 / -1; }
+.grid .day-rows .chips { margin-bottom: 4px; }
+.phase .chip { flex: 1; justify-content: center; }
+
 /* A recorded morning outcome (R02): persists after the tap, unlike the
    momentary :active state below. */
 .action.selected { background: var(--raised); border-color: var(--accent); }

@@ -10,7 +10,7 @@ import {
   insertEvent, isReviewed, isUntouchedNight, latestEvent, migrate,
   monthNightsWithGaps, moveEventTo, newDrink, newEvent, newNight, nightIdFor,
   nightIdForIso, nightStatus, openNight, outcomeConflict, parseIso,
-  pendingReviewFor, phaseFor, dayOwnerId, prevNightId, removeDrink, removeEvent, restoreNight,
+  pendingReviewFor, phaseFor, dayOwnerId, prevNightId, removeDrink, undoAction, removeEvent, restoreNight,
   retypeEvent, setNoDrinks, stepValue, suggestedEveningTimes, toggleSleepSign,
   toIso, validateDoc,
   applyRestore, assignExperiment, csvEscape, csvRows, csvText, daysSince,
@@ -1127,6 +1127,34 @@ export function runSelfTests() {
     assert(dayOwnerId(at(8)) === '2026-09-12', `08:00 on the 13th belongs to the night of the 12th, got ${dayOwnerId(at(8))}`);
     assert(dayOwnerId(at(17)) === '2026-09-12', `17:00 on the 13th still belongs to the night of the 12th, got ${dayOwnerId(at(17))}`);
     return 'Record first; 23:30–10:00 falls back to night, 10:00–15:00 to day';
+  });
+
+  t('Undo reverses the last tap, whatever it wrote', () => {
+    const doc = emptyDoc();
+    const night = ensureNight(doc, '2026-09-13');
+    // A stamp: Fell asleep wrote asleepAt over null.
+    night.evening.asleepAt = '2026-09-13T20:45:00+02:00';
+    const stamp = { kind: 'field', nightId: '2026-09-13', block: 'evening', key: 'asleepAt', prev: null, value: night.evening.asleepAt };
+    assert(undoAction(doc, stamp) === true, 'the stamp was not undone');
+    assert(night.evening.asleepAt === null, 'asleepAt did not go back to unknown');
+    assert(undoAction(doc, stamp) === false, 'a second undo of the same stamp claimed success');
+    // A field edited since the tap is left alone.
+    night.morning.outcome = 'wet';
+    const outcome = { kind: 'field', nightId: '2026-09-13', block: 'morning', key: 'outcome', prev: null, value: 'dry' };
+    assert(undoAction(doc, outcome) === false && night.morning.outcome === 'wet', 'an outcome changed since the tap was overwritten');
+    // A drink row, with the "no drinks" it had cleared coming back.
+    setNoDrinks(night.evening, true);
+    const drink = newDrink('2026-09-13T19:10:00+02:00');
+    addDrink(night.evening, drink);
+    assert(night.evening.noDrinks === null, 'addDrink left noDrinks confirmed');
+    assert(undoAction(doc, { kind: 'drink', nightId: '2026-09-13', id: drink.id, prevNoDrinks: true }) === true, 'the drink was not undone');
+    assert(night.evening.drinks.length === 0 && night.evening.noDrinks === true, 'undoing the drink did not restore no-drinks');
+    // An event, found by id wherever it now sits.
+    const ev = insertEvent(night, newEvent('wet', '2026-09-14T02:12:00+02:00'));
+    assert(undoAction(doc, { kind: 'event', id: ev.id }) === true && night.events.length === 0, 'the event was not undone');
+    assert(undoAction(doc, { kind: 'event', id: ev.id }) === false, 'a missing event was reported undone');
+    assert(undoAction(doc, null) === false && undoAction(doc, { kind: 'field', nightId: '2026-01-01', block: 'evening', key: 'asleepAt' }) === false, 'nothing to undo must be false');
+    return 'Stamp, outcome, drink row and event each reversed once; a later edit is kept';
   });
 
   t('A redraw waits for an open time picker', () => {

@@ -69,7 +69,7 @@ function reset(nightId) {
   state.failure = null;
   state.detailNote = '';
   state.detailFailure = null;
-  state.nudgeLater = false;
+  nudge.later = false;
 }
 
 /* ── Writes ─────────────────────────────────────────────────────────────
@@ -223,9 +223,12 @@ function confirmation(ctx, draw) {
 }
 
 // DESIGN.md §9.3: one quiet Sunday offer, dismissible for this visit. A
-// backup nobody has confirmed saving counts as none.
-function backupNudge(ctx, draw) {
-  if (state.nudgeLater) return null;
+// backup nobody has confirmed saving counts as none. Exported: the outcome
+// is usually recorded on Tonight's day phase now, and the nudge follows it.
+const nudge = { later: false };
+
+export function backupNudge(ctx, draw) {
+  if (nudge.later) return null;
   const now = ctx.now();
   if (now.getDay() !== 0) return null;
   const doc = ctx.store.get();
@@ -243,7 +246,7 @@ function backupNudge(ctx, draw) {
       button({ label: 'Back up now', href: '#/more/backup', k: 'backup-now' }),
       button({
         label: 'Later', kind: 'quiet', k: 'backup-later',
-        onClick: () => { state.nudgeLater = true; draw(); },
+        onClick: () => { nudge.later = true; draw(); },
       }),
     ],
   });

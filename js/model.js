@@ -648,6 +648,40 @@ export function dayOwnerId(now = new Date()) {
   return shiftDate(isoDate(now.getFullYear(), now.getMonth() + 1, now.getDate()), -1);
 }
 
+/* ── Undo ───────────────────────────────────────────────────────────────
+   Tonight's strip undoes the last tap whatever it was: an event, a drink
+   row, or a value written into a field (a stamp like asleepAt, an outcome,
+   a stool answer). One rule here, asserted on the Check tab, rather than
+   three copies in the screen. Returns false when there is nothing left to
+   undo — the entry was removed elsewhere, or the field has moved on. */
+
+export function undoAction(draft, action) {
+  if (!action || typeof action !== 'object') return false;
+  if (action.kind === 'event') {
+    const night = nightForEvent(draft, action.id);
+    return !!(night && removeEvent(night, action.id));
+  }
+  const night = findNight(draft, action.nightId);
+  if (!night) return false;
+  if (action.kind === 'drink') {
+    const removed = removeDrink(night.evening, action.id);
+    // Adding the drink cleared a confirmed "no drinks"; taking it back
+    // restores that confirmation rather than leaving the evening unknown.
+    if (removed && action.prevNoDrinks === true && !night.evening.drinks.length) night.evening.noDrinks = true;
+    return !!removed;
+  }
+  if (action.kind === 'field') {
+    const block = night[action.block];
+    if (!block || typeof block !== 'object') return false;
+    // Only while the field still holds what the tap wrote: an edit made
+    // since is not the parent's last action, and must not be thrown away.
+    if (JSON.stringify(block[action.key] ?? null) !== JSON.stringify(action.value ?? null)) return false;
+    block[action.key] = action.prev ?? null;
+    return true;
+  }
+  return false;
+}
+
 /* ── History (H01–H06) ──────────────────────────────────────────────────
    Everything the history list, the night detail and the event edit draft
    need over the document. Pure, so the awkward parts — the boundary move,
