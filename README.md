@@ -9,12 +9,15 @@ Visual design: [UX handoff](docs/UX-HANDOFF.md),
 These are design studies for the implementation phase. When serving locally,
 open `/docs/ux/` to browse all screens.
 
-**Status: M5 built, awaiting on-phone verification.** Tonight logging with
-optional detail and undo, evening / morning / following-day cards, history
-with editing and backfill, patterns with hand-rolled charts, routines, backup
-and restore, CSV / JSON / printable summary, and a More screen that holds the
-install and self-test checks. What has not been verified on the actual iPhone
-is listed in [docs/IMPLEMENTATION.md §7](docs/IMPLEMENTATION.md).
+**Status: M5 built and in nightly use; revised 17 September 2026.** Tonight is
+one grid in three phases — evening, night, day — where every step is a single
+tap with optional detail and undo; the evening / morning / following-day cards
+remain as edit forms reached from a night's record; history with editing and
+backfill, patterns with hand-rolled charts, routines, backup and restore,
+CSV / JSON / printable summary, and a More screen that holds the install and
+self-test checks. Navigation is three tabs plus one back button. What has not
+been verified on the actual iPhone is listed in
+[docs/IMPLEMENTATION.md §7](docs/IMPLEMENTATION.md).
 
 ## Privacy
 

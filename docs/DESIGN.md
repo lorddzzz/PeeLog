@@ -5,7 +5,9 @@ A night-wetting tracker for one child, built for the person logging at 3am.
 **Design handoff:** the approved visual direction and complete basic UX are
 documented in [UX-HANDOFF.md](UX-HANDOFF.md), with a [screen atlas](ux/index.html)
 and [asset library](ux/ASSETS.md). That handoff supersedes this document's earlier
-visual and interaction proposals.
+visual and interaction proposals — except where §4 below has since moved on
+(17 September 2026: Tonight's three phases, the retired fields, and the
+one-back-button navigation), which is now the rule.
 
 **Build plan:** [IMPLEMENTATION.md](IMPLEMENTATION.md) — module map, milestone
 pass/fail bars, and the record of how the two specs were reconciled. The
@@ -72,7 +74,6 @@ Keyed by the date of the **evening**. The night of Sep 13 → morning of Sep 14 
 ```jsonc
 {
   "id": "2026-09-13",
-  "diaper": null,                    // null | none | pull-up | diaper  (what she wore)
   "experimentId": null,
 
   "evening": {
@@ -95,23 +96,27 @@ Keyed by the date of the **evening**. The night of Sep 13 → morning of Sep 14 
   "morning": {
     "outcome": null,                 // null review due | dry | wet — confirmed, never derived
     "wakeAt": null,
-    "changes": null,                 // null unknown; 0 is an answer
     "mood": null,                    // upset | ok | happy
     "sleepSigns": null,              // null unknown | ["none"] exclusive | snoring | mouth-breathing | restless
     "eventsComplete": null,          // null | true — the night's events are known to be complete
     "note": ""
   },
 
-  "day": {                           // the day AFTER this night; filled at next evening, optional
-    "toiletCount": null,
-    "urgency": null,                 // sudden desperate "I need to go NOW"
-    "holding": null,                 // crossing legs, squatting, holding maneuvers
-    "accidents": null,               // daytime wetting
-    "stool": null,                   // null no record | none | hard | normal | loose
-    "fluids": null                   // null | low | normal | high
+  "day": {                           // the day AFTER this night; optional
+    "accidents": null,               // daytime wetting, a count; 0 is an answer
+    "stool": null                    // null no record | none | hard | normal | loose
   }
 }
 ```
+
+**Retired fields (17 September 2026).** `diaper`, `morning.changes`,
+`day.toiletCount`, `day.urgency`, `day.holding` and `day.fluids` are no longer
+asked anywhere: the parent is not with her through the day, what she wore was
+always nothing, and a morning count of full changes duplicated what the wet
+entries already say. A document that holds them is still valid — `migrate`
+keeps unknown keys, nothing reads them, restore carries them through — so no
+version bump was needed. The CSV exports `changes_recorded` instead: wet
+entries where sheets or pyjamas were changed.
 
 `morning.outcome !== null` *is* the definition of a reviewed night — there is no
 separate reviewed flag that could fall out of sync with it.
@@ -174,7 +179,32 @@ Three. No navigation drawer, no settings maze. A tab bar of three items.
 ### 4.1 Tonight — the home screen, and the only one that matters at 3am
 
 Opens directly to the active night. Near-black `#10151E` ground, dim desaturated accents,
-large type. Buttons are a 2×3 grid filling the lower two-thirds of the screen (thumb zone):
+large type. **One grid, three phases**, and everything on it follows the same rule as a
+night event: the first tap saves, detail is optional enrichment below.
+
+| Phase | Read off the record as | Grid |
+|---|---|---|
+| Evening | no `asleepAt` | Dinner · Drink · Last toilet · Lights out, then **Fell asleep** (wide) |
+| Night | `asleepAt` set, no `wakeAt` | the five night actions below, then **She's up** (wide) |
+| Day | `wakeAt` set | **Dry night / Wet night**, She's up (time + mood, sleep signs, note), Stool chips, Daytime accidents stepper |
+
+Each step stamps *now* into the field the cards used to ask for (`evening.dinnerAt`,
+`morning.wakeAt`, a row in `evening.drinks` …), so the stored record did not change
+shape. A step already stamped opens its panel to edit the time rather than stamping
+again; Last toilet is the exception and re-stamps, because it is the *last* one. The
+phase is derived, never stored, so the screen cannot disagree with the data. Where the
+record says nothing the clock fills in: 23:30–10:00 reads as night, 10:00 to the 15:00
+boundary as day. An Evening · Night · Day pill switches the view for a visit — a night
+event at 21:00 before anyone tapped Fell asleep, or last night's review at 16:00 — and
+the step that would have brought the screen into the current phase is offered again,
+compact, while its stamp is missing. Stool and accidents also sit under the evening
+grid, labelled as today, so a 17:00 stool lands on last night's day.
+
+Undo reverses the last tap whatever it wrote — an event, a drink row, a stamp, an
+outcome, a stool answer — through one rule in `model.js`. With nothing tapped this
+visit it falls back to removing the night's latest event, as before.
+
+The night grid is unchanged (thumb zone, 2×3):
 
 ```
 ┌─────────────────┬─────────────────┐
@@ -211,9 +241,11 @@ API is unavailable in Safari on iOS. The setting ships as a feature-detected row
 says so and does nothing else. The screen will dim mid-tap; the action grid's size is
 what has to survive that.
 
-### 4.2 Evening & Morning cards
+### 4.2 Evening, Morning & Day cards
 
-Reached from Tonight; each is a single scrolling card of chip rows and native time
+Edit forms, reached from a night's record in History (and from the stale-night
+review link on Tonight). Tonight itself no longer links to them: what they ask is
+logged on the grid. Each is a single scrolling card of chip rows and native time
 fields. Every field is skippable. A suggested time — now, or last night's value — is a
 placeholder until it is explicitly accepted; a displayed suggestion is never a stored fact.
 
@@ -234,6 +266,19 @@ An outcome never deletes an event.
   first-class flow, not an afterthought.
 - Below it, the metrics (§5).
 - Export button.
+
+### 4.4 Navigation
+
+Three tabs, and **one back button in the header**, top-left, on every screen that has
+somewhere to go. It returns to the screen this session came from — the same thing the
+phone's back gesture does, so the two never disagree — and on a cold deep link falls back
+to the route's parent. No screen carries its own "Back to …" row, and no screen links
+sideways to a sibling (Privacy → Backup, Export → Backup, Summary → Export, and the like
+are gone): a screen links only to its own children. Saves, cancels and deletes navigate
+with *replace*, or pop when they return to the screen the draft was opened from, so
+backing out of a night never lands on the edit form it just left. History's
+Nights / Patterns / Routines control is a segmented view of one tab, not a link maze,
+and stays.
 
 ## 5. Metrics — the part that answers the questions
 
@@ -288,7 +333,9 @@ Not medical advice — just what shapes the schema, and what a doctor will ask:
   against the *next* night's outcome.
 - **Sleep-disordered breathing** (snoring, mouth breathing) is the second. Hence `sleepSigns`.
 - **Daytime symptoms** (urgency, holding, daytime accidents) are what separate isolated
-  night wetting from something broader. Hence the `day` block.
+  night wetting from something broader. Only daytime accidents are still recorded: the
+  parent is not with her through the day, and a field that is never filled in is worse
+  than no field (it reads as "no" to anyone skimming the sheet).
 - Volume and timing matter: large volume early in the night, with no waking, points somewhere
   different than small volumes repeatedly through the night.
 
@@ -348,8 +395,9 @@ Mitigations, all in v1:
 2. A bare **Export JSON** button, shipped in **M1** rather than with the rest of this
    section. The risk starts the night the first real event is logged, not the week the
    backup flow gets designed. M5's B01 replaces it.
-3. **Weekly backup nudge** — on Sundays the morning card surfaces a Backup button that exports
-   JSON via the Web Share sheet, straight into Files / iCloud Drive. One tap.
+3. **Weekly backup nudge** — on Sundays, once the outcome is recorded, Tonight's day phase
+   (and the morning card) surfaces a Backup button that exports JSON via the Web Share
+   sheet, straight into Files / iCloud Drive. One tap.
 4. A "last backup: N days ago" indicator that turns amber past 10 days.
 5. An Import screen that accepts a pasted or picked JSON file, so recovery actually works.
 

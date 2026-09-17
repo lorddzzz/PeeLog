@@ -8,6 +8,14 @@ screen studies, interaction specifications, copy, and design assets. The atlas
 only navigates between examples; it does not implement logging, calculations,
 storage, exports, or recovery.
 
+> **Superseded in part, 17 September 2026.** After real nights on the phone, Tonight
+> became one grid in three phases (T01), the evening / morning / day cards became edit
+> forms reached from a night's record (R01–R03), "what she wore", full changes, toilet
+> visits, urgency, holding and fluids were retired, and every "Back to …" row and
+> sibling link gave way to one back button in the header (interaction rule 7, and the
+> flow diagram below). [DESIGN.md §4](DESIGN.md#4-screens) is the rule where this
+> document disagrees.
+
 - [Browse the screen atlas](ux/index.html)
 - [Visual direction](VISUAL-DIRECTION.md)
 - [Asset inventory and usage](ux/ASSETS.md)
