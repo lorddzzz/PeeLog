@@ -101,11 +101,28 @@ button, a, select { -webkit-tap-highlight-color: transparent; }
 
 .top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 10px 16px 6px;
 }
 .top h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+/* The one way back, always top-left: no screen carries its own "Back to…"
+   row, so a trail of edits never grows a second set of links. */
+.top .back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -10px 0 -10px -14px;
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.top .back[hidden] { display: none; }
+.top .back .ico { width: 22px; height: 22px; }
 .ver { font-size: var(--size-meta); color: var(--secondary); font-variant-numeric: tabular-nums; }
 
 main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }

@@ -143,10 +143,65 @@ function match(hash) {
   return null;
 }
 
+/* ── Back ───────────────────────────────────────────────────────────────
+   One back control in the header, on every screen that has somewhere to go.
+   It returns to the screen this session came from, which is what the
+   phone's own back gesture does, so the two never disagree; on a cold deep
+   link there is no trail, and the route's parent stands in. A save, delete
+   or cancel navigates with `replace`, so backing out of a night never lands
+   on the edit form it just left. */
+
+const trail = [];      // hashes visited this session, oldest first
+let replacing = false; // the next route() rewrites the top of the trail
+
+function parentOf(hash) {
+  const parts = hash.replace(/^#/, '').split('/').filter(Boolean);
+  const [head, id] = parts;
+  switch (head) {
+    case 'event': return '#/tonight';
+    case 'evening': case 'morning': case 'day': return `#/night/${id}`;
+    case 'night': return parts.length > 2 ? `#/night/${id}` : '#/history';
+    case 'history': return parts.length > 1 ? '#/history' : null;
+    case 'routines': return parts.length > 1 ? '#/routines' : null;
+    case 'more': return parts.length > 1 ? '#/more' : null;
+    case 'summary': return '#/more/export';
+    case 'check': return '#/more';
+    // tonight, history, patterns, more, welcome: a tab, or a section of one.
+    default: return null;
+  }
+}
+
+function track(hash) {
+  const last = trail[trail.length - 1];
+  if (trail.length > 1 && trail[trail.length - 2] === hash) trail.pop();
+  else if (replacing && trail.length) trail[trail.length - 1] = hash;
+  else if (last !== hash) trail.push(hash);
+  replacing = false;
+}
+
+const backButton = document.getElementById('back');
+
+function goBack() {
+  const hash = location.hash || '#/tonight';
+  if (trail.length > 1 && trail[trail.length - 1] === hash) history.back();
+  else ctx.navigate(parentOf(hash) ?? '#/tonight', { replace: true });
+}
+backButton.addEventListener('click', goBack);
+
 const ctx = {
   store,
   params: {},
-  navigate: hash => { location.hash = hash; },
+  navigate: (hash, { replace = false } = {}) => {
+    if (!replace) { location.hash = hash; return; }
+    // A save that returns to the screen the draft was opened from is a step
+    // back, not a new entry: replacing would leave that screen in the
+    // browser history twice, and the next back would land on it again.
+    if (trail.length > 1 && trail[trail.length - 2] === hash) { history.back(); return; }
+    replacing = true;
+    history.replaceState(null, '', hash);
+    route();
+  },
+  back: goBack,
   now: () => new Date(),
   // The build and the service worker, for More → Install & offline. Passed
   // in rather than imported, so no screen has to import app.js back.
@@ -173,6 +228,9 @@ function route() {
   if (cleanup) cleanup();
   cleanup = null;
   screen.replaceChildren();
+
+  track(hash);
+  backButton.hidden = parentOf(hash) === null;
 
   ctx.params = hit.params;
   cleanup = hit.render(screen, ctx) ?? null;

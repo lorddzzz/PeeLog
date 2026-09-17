@@ -301,7 +301,6 @@ function chooseScreen(ctx, redraw) {
       onClick: () => { restore.text = box.value; read(box.value, redraw); },
     }),
     notice({ text: 'Nothing changes until you review the preview and confirm.' }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
 }
 
@@ -465,8 +464,6 @@ function doneScreen(ctx) {
     plan.routinesAdded
       ? h('p', { class: 'small', text: `${plan.routinesAdded} routine record${plan.routinesAdded === 1 ? '' : 's'} came with them.` })
       : null,
-    button({ label: 'Open History', kind: 'primary', href: '#/history', k: 'history' }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
 }
 
@@ -538,13 +535,11 @@ function exportScreen(ctx, redraw) {
     rangeField('Through', 'toId', refresh),
     rangeError,
     csvRow,
-    linkRow({ label: 'Full backup · JSON', sub: 'All dates and details', href: '#/more/backup', k: 'json' }),
     linkRow({ label: 'Printable summary', sub: 'Preview before saving or sharing', href: '#/summary', k: 'summary' }),
     notice({
       title: 'Blank values stay blank.',
-      text: 'Unknown answers are never exported as No, zero, or Dry.',
+      text: 'Unknown answers are never exported as No, zero, or Dry. The full JSON backup is under Backup & restore.',
     }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
 }
 

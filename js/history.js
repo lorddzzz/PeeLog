@@ -253,7 +253,6 @@ function nightDetail(ctx, draw) {
       title({ overline: nightLabelFor(id), name: 'No record' }),
       notice({ text: 'Nothing has been recorded for this night yet.' }),
       button({ label: 'Add this night', href: '#/history/add', k: 'add' }),
-      linkRow({ label: 'Back to History', href: '#/history', k: 'back' }),
     ];
   }
 
@@ -301,7 +300,6 @@ function nightDetail(ctx, draw) {
         label: 'Delete this night…', kind: 'danger', icon: 'delete', k: 'delete-night',
         onClick: () => { nightState.confirmDelete = true; draw(); },
       }),
-    linkRow({ label: 'Back to History', href: '#/history', k: 'back' }),
   ];
 }
 
@@ -391,7 +389,7 @@ function deleteNightSheet(ctx, night, draw) {
           return;
         }
         pendingList = { undoNight: removed };
-        ctx.navigate('#/history');
+        ctx.navigate('#/history', { replace: true });
       },
     }),
     button({ label: 'Cancel', kind: 'quiet', k: 'cancel-delete', onClick: () => { nightState.confirmDelete = false; draw(); } }));
@@ -446,7 +444,6 @@ function eventEdit(ctx, draw) {
     return [
       title({ overline: nightLabelFor(id), name: 'Not found' }),
       notice({ text: 'That entry is no longer recorded.' }),
-      linkRow({ label: 'Back to this night', href: `#/night/${id}`, k: 'back' }),
     ];
   }
 
@@ -496,7 +493,7 @@ function eventEdit(ctx, draw) {
       })
       : null,
     button({ label: 'Save changes', kind: 'primary', k: 'save', onClick: () => save(ctx, draw) }),
-    button({ label: 'Cancel', kind: 'quiet', k: 'cancel', onClick: () => ctx.navigate(`#/night/${id}`) }),
+    button({ label: 'Cancel', kind: 'quiet', k: 'cancel', onClick: () => ctx.back() }),
     edit.isNew ? null : (edit.confirmDelete
       ? deleteEventSheet(ctx, draw)
       : button({
@@ -592,7 +589,8 @@ function save(ctx, draw) {
     undoEvent: null,
     reviewTouched: touched,
   };
-  ctx.navigate(`#/night/${toId}`);
+  // Replace, not push: backing out of the night must not reopen this draft.
+  ctx.navigate(`#/night/${toId}`, { replace: true });
 }
 
 function applyFields(ev) {
@@ -629,7 +627,7 @@ function deleteEventSheet(ctx, draw) {
           undoEvent: { nightId: fromId, event: removed },
           reviewTouched: reviewed && event.type === 'wet' ? fromId : null,
         };
-        ctx.navigate(`#/night/${fromId}`);
+        ctx.navigate(`#/night/${fromId}`, { replace: true });
       },
     }),
     button({ label: 'Keep event', kind: 'quiet', k: 'cancel-delete', onClick: () => { edit.confirmDelete = false; draw(); } }));
@@ -685,7 +683,6 @@ function backfill(ctx, draw) {
         label: 'Create night', kind: 'primary', k: 'create',
         onClick: () => create(ctx, target, tonightId, draw),
       }),
-    linkRow({ label: 'Back to History', href: '#/history', k: 'back' }),
   ];
 }
 
@@ -702,5 +699,5 @@ function create(ctx, target, tonightId, draw) {
   // The month the new night is in, so it is on screen when History is next
   // opened rather than hidden behind the month arrows.
   state.month = monthOf(target.id);
-  ctx.navigate(`#/night/${target.id}`);
+  ctx.navigate(`#/night/${target.id}`, { replace: true });
 }

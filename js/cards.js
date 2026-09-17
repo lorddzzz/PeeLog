@@ -5,7 +5,7 @@
 import {
   DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, activeExperiment, addDrink,
   dayDateFor, dayLabelFor, daysSince, ensureNight, findDrink, findNight,
-  newDrink, nightIdFor, openNight, outcomeConflict, prevNightId, removeDrink,
+  newDrink, nightIdFor, openNight, outcomeConflict, removeDrink,
   setNoDrinks, suggestedEveningTimes, timeLabelFor, toggleSleepSign,
   weekdayNameFor,
 } from './model.js';
@@ -134,7 +134,7 @@ function morning(ctx, draw) {
       outcomeButton(ctx, night, 'wet', 'Wet night', 'drop', draw)),
     state.conflict ? conflictNotice(ctx, draw) : null,
     state.failure ? failureNotice(ctx, draw) : null,
-    outcome ? confirmation(ctx, id, draw) : null,
+    outcome ? confirmation(ctx, draw) : null,
     h('h3', { text: 'A little more detail' }),
     timeField({
       label: 'Woke at', value: m.wakeAt, dates: dayDateFor(id), k: 'wake',
@@ -159,7 +159,7 @@ function morning(ctx, draw) {
       onCommit: text => writeMorningDetail(ctx, morn => { morn.note = text; }, draw),
     }),
     detailNote(state),
-    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.navigate('#/tonight') }),
+    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.back() }),
   ];
 }
 
@@ -214,18 +214,12 @@ function failureNotice(ctx, draw) {
 // R04: same treatment whether the outcome is Dry or Wet, and the buttons
 // above stay visible and editable — this is a confirmation, not a hand-off
 // to a different screen.
-function confirmation(ctx, id, draw) {
+function confirmation(ctx, draw) {
   return h('div', {},
-    savedStrip({
-      text: 'Night outcome recorded',
-      detail: 'Morning review saved',
-      onOpen: () => ctx.navigate(`#/night/${id}`),
-    }),
+    savedStrip({ text: 'Night outcome recorded', detail: 'Morning review saved' }),
     // The weekly nudge sits below the confirmation, never above the outcome
     // (R04), and only on a Sunday morning.
-    backupNudge(ctx, draw),
-    linkRow({ label: 'Back to Tonight', href: '#/tonight', k: 'back-tonight' }),
-    linkRow({ label: 'See this night', href: `#/night/${id}`, k: 'see-night' }));
+    backupNudge(ctx, draw));
 }
 
 // DESIGN.md §9.3: one quiet Sunday offer, dismissible for this visit. A
@@ -289,8 +283,6 @@ function evening(ctx, draw) {
   const ev = night?.evening ?? { drinks: [], dayContext: [] };
   const dates = [id, dayDateFor(id)];
   const suggested = suggestedEveningTimes(doc, id);
-  const prevId = prevNightId(id);
-  const prevExists = !!findNight(doc, prevId);
 
   return [
     title({
@@ -347,10 +339,7 @@ function evening(ctx, draw) {
     }),
     routineRow(doc, night, id),
     detailNote(eveningState),
-    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.navigate('#/tonight') }),
-    prevExists
-      ? linkRow({ label: 'Yesterday’s daytime', href: `#/day/${prevId}`, k: 'prev-day' })
-      : null,
+    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.back() }),
   ];
 }
 
@@ -378,7 +367,8 @@ function drinkRow(ctx, id, dates, drink, index, draw) {
     }));
 }
 
-// The routine this evening belongs to (R01), and no advice about it. A night
+// The routine this evening belongs to (R01), named and nothing more — no
+// advice, and no link off to Routines from the middle of an evening. A night
 // recorded before its routine started carries no tag, so the dates are asked
 // for as well — the answer is the same one night creation used.
 function routineRow(doc, night, nightId) {
@@ -386,14 +376,10 @@ function routineRow(doc, night, nightId) {
   const exp = (tagged ? doc.experiments.find(e => e.id === tagged) : null)
     ?? activeExperiment(doc, night?.id ?? nightId ?? null);
   if (!exp) return null;
-  return linkRow({
-    label: exp.name,
-    sub: exp.to
-      ? `${dayLabelFor(exp.from)} – ${dayLabelFor(exp.to)}`
-      : `since ${dayLabelFor(exp.from)}`,
-    href: `#/routines/${exp.id}`,
-    k: 'routine',
-  });
+  const when = exp.to
+    ? `${dayLabelFor(exp.from)} – ${dayLabelFor(exp.to)}`
+    : `since ${dayLabelFor(exp.from)}`;
+  return h('p', { class: 'small', k: 'routine', text: `Routine: ${exp.name} · ${when}` });
 }
 
 /* ── Following day (R03) ────────────────────────────────────────────────
@@ -440,9 +426,6 @@ function day(ctx, draw) {
       onChange: v => writeDay(ctx, n => { n.day.stool = v; }, draw),
     }),
     detailNote(dayState),
-    button({
-      label: 'Done', k: 'done', kind: 'primary',
-      onClick: () => { if (history.length > 1) history.back(); else ctx.navigate('#/tonight'); },
-    }),
+    button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.back() }),
   ];
 }

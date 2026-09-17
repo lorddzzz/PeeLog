@@ -314,7 +314,6 @@ function failureNotice(ctx, draw) {
       // The retry keeps the original timestamp: the event happened then, not
       // when the storage finally accepted it.
       button({ label: 'Retry saving', k: 'retry', onClick: () => logEvent(ctx, type, draw, { at: t }) }),
-      linkRow({ label: 'Export existing records', href: '#/check', k: 'export' }),
     ],
   });
 }
@@ -353,7 +352,6 @@ function eventScreen(ctx, draw) {
     return [
       title({ overline: 'Entry', name: 'Not found' }),
       notice({ text: 'That entry is no longer recorded.' }),
-      linkRow({ label: 'Back to Tonight', href: '#/tonight' }),
     ];
   }
   return [
@@ -363,7 +361,7 @@ function eventScreen(ctx, draw) {
     state.moveNote ? notice({ text: state.moveNote }) : null,
     reviewNotice(doc, state.reviewTouched, night?.id ?? null),
     detail(ctx, event, draw, {
-      onDone: () => ctx.navigate('#/tonight'),
+      onDone: () => ctx.back(),
       heading: false,
       // On its own screen a newly logged event gets its own URL, so the hash
       // never names one entry while another is on screen.

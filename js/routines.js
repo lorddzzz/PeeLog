@@ -193,7 +193,7 @@ function createForm(ctx, redraw) {
     button({
       label: 'Cancel', kind: 'quiet', k: 'cancel',
       onClick: () => {
-        if (!dirty()) { ctx.navigate('#/routines'); return; }
+        if (!dirty()) { ctx.back(); return; }
         draft.discard = true;
         redraw();
       },
@@ -205,7 +205,7 @@ function discardSheet(ctx, redraw) {
   return sheet(
     h('h3', { text: 'Discard this routine?' }),
     h('p', { class: 'lead', text: 'Nothing has been recorded yet. The name and note will be lost.' }),
-    button({ label: 'Discard', kind: 'danger', k: 'discard', onClick: () => ctx.navigate('#/routines') }),
+    button({ label: 'Discard', kind: 'danger', k: 'discard', onClick: () => ctx.navigate('#/routines', { replace: true }) }),
     button({
       label: 'Keep editing', kind: 'quiet', k: 'keep',
       onClick: () => { draft.discard = false; redraw(); },
@@ -234,7 +234,7 @@ function save(ctx, open, setError) {
     assignExperiment(d, exp);
   });
   if (!result.ok) { setError('Not saved'); return; }
-  ctx.navigate(`#/routines/${exp.id}`);
+  ctx.navigate(`#/routines/${exp.id}`, { replace: true });
 }
 
 /* ── X03 · Detail, and X04's end sheet ──────────────────────────────── */
@@ -270,7 +270,6 @@ function detailScreen(ctx, redraw) {
     return [
       title({ overline: 'Routines', name: 'Not recorded' }),
       h('p', { class: 'lead', text: 'This routine is no longer in the log.' }),
-      linkRow({ label: 'Back to Routines', href: '#/routines', k: 'back' }),
     ];
   }
   if (detail.editing) return editForm(ctx, exp, redraw);
@@ -310,7 +309,6 @@ function detailScreen(ctx, redraw) {
         k: 'end',
       })
       : null,
-    linkRow({ label: 'Back to Routines', href: '#/routines', k: 'back' }),
   ];
 }
 
@@ -452,8 +450,7 @@ function endSheet(ctx, exp, redraw) {
     }),
     notice({
       title: 'Starting a different routine?',
-      text: 'Record the next change and this one is ended the evening before it begins.',
-      children: [linkRow({ label: 'Record the next change', href: '#/routines/new', k: 'next' })],
+      text: 'Record the next change from Routines instead, and this one is ended the evening before it begins.',
     }),
   ];
 }
@@ -469,5 +466,5 @@ function removeScheduled(ctx, exp, redraw) {
   if (!confirm(`Remove “${exp.name}”? It has no nights recorded yet.`)) return;
   const result = ctx.store.update(d => removeExperiment(d, exp.id));
   if (!result.ok) { detail.error = 'Not saved'; redraw(); return; }
-  ctx.navigate('#/routines');
+  ctx.navigate('#/routines', { replace: true });
 }

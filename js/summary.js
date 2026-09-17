@@ -11,7 +11,7 @@ import {
 } from './metrics.js';
 import { exportRange } from './backup.js';
 import { activeExperiment, dayLabelFor, prevNightId } from './model.js';
-import { button, h, linkRow, paint, title } from './ui.js';
+import { button, h, paint, title } from './ui.js';
 
 /* ── The numbers ────────────────────────────────────────────────────────
    Pure. metrics.js owns every denominator; this only adds the tallies the
@@ -141,8 +141,6 @@ function screen(ctx) {
       onClick: () => window.print(),
     }),
     sheetFor(data, noteBlock),
-    linkRow({ label: 'Change the date range', href: '#/more/export', k: 'range' }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
 }
 

@@ -26,7 +26,7 @@ export function renderWelcome(el, ctx) {
         // A failed write here must not stand between a tired parent and the
         // action grid; Welcome simply shows once more next launch.
         ctx.store.update(d => { d.settings.welcomed = true; });
-        ctx.navigate('#/tonight');
+        ctx.navigate('#/tonight', { replace: true });
       },
     }),
     button({ label: 'Install on this phone', href: '#/more/install', k: 'install' }),
@@ -132,7 +132,6 @@ function appearance(ctx, draw) {
       text: 'Motion follows your phone’s reduced-motion setting. There is no daytime theme; '
         + 'the printable summary is the only light page.',
     }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ];
 }
 
@@ -231,8 +230,6 @@ export function renderInstall(el, ctx) {
       text: 'Storage retention is decided by the browser. A separate backup is the only '
         + 'thing that survives a lost phone or cleared site data.',
     }),
-    linkRow({ label: 'Backup & restore', href: '#/more/backup', k: 'backup' }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ]);
 
   refresh();
@@ -251,12 +248,7 @@ export function renderPrivacy(el, ctx) {
       + 'Clearing browser data, losing the phone, or an iOS storage cleanup can lose the log.' }),
     h('p', { class: 'lead', text: 'Only an export you choose leaves the phone, and where it goes '
       + 'afterwards is up to you.' }),
-    linkRow({
-      label: 'Make a separate backup',
-      sub: `Last backup: ${age.text}`,
-      href: '#/more/backup',
-      k: 'backup',
-    }),
+    h('p', { class: 'small', text: `Last backup: ${age.text}` }),
     h('h3', { text: 'A gentle reminder' }),
     h('p', { class: 'lead', text: 'Use your phone’s Reminders or alarms for a bedtime note and a '
       + 'morning review. PeeLog cannot schedule an alarm: iOS gives web apps no reliable '
@@ -266,7 +258,5 @@ export function renderPrivacy(el, ctx) {
       + 'phone supports it.' }),
     h('p', { class: 'small', text: `The backup nudge here turns amber after ${OVERDUE_DAYS} days. `
       + 'It never appears on the nighttime screen.' }),
-    linkRow({ label: 'Install & offline check', href: '#/more/install', k: 'install' }),
-    linkRow({ label: 'Back to More', href: '#/more', k: 'back' }),
   ]);
 }
