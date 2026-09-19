@@ -61,6 +61,23 @@ field, a screen — with a message that says why, not what. Push `main` when a
 task, feature or improvement is finished, since pushing is the deploy. Never
 leave finished work sitting uncommitted or a finished task unpushed.
 
+**Work directly on `main`.** No feature branches, no pull requests, no review
+queue — one person, one phone, and a deploy that is just a push. Commit to
+`main` and push as soon as a unit of work passes the bar below. A change that
+sits on a branch waiting to be merged is a night of data we might not collect.
+
+This makes **Done means verified** the only thing between a change and the
+phone at 3am. There is no reviewer and no staging copy, so the cost of that is
+real: a bad push is live, and it is live on the one device the data lives on.
+So the trade is not "ship faster, check less" — it is ship immediately
+*because* the check already happened. Never push to get something off your
+desk, and never push a change you have only read rather than driven.
+
+Two things still earn a pause before the push, and they are the only two:
+a change that can lose or reshape recorded data (the schema, `migrate`,
+restore, delete), and one that cannot be undone from inside the app. Say what
+you are about to do and wait for me.
+
 ## Done means verified
 
 Done = produced **and** verified against the real thing, not from a diff, a
