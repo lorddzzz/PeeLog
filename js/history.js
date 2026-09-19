@@ -16,18 +16,17 @@ import {
   button, chipGroup, dateField, dateTimeField, h, icon, linkRow, notice, paint,
   savedStrip, sheet, title,
 } from './ui.js';
-import { FIELD_COPY, reviewNotice } from './tonight.js';
+import { FIELD_COPY } from './tonight.js';
 
 /* ── Screen copy ───────────────────────────────────────────────────────── */
 
-// Outcome states are labelled, never colour alone: "wet recorded, review due"
-// is a different fact from a confirmed wet night, and a calendar gap reads
-// "No record" — never Dry (UX-HANDOFF S01).
+// Outcome states are labelled, never colour alone: a night nobody has been up
+// on yet is a different fact from a confirmed dry one, and a calendar gap
+// reads "No record" — never Dry (UX-HANDOFF S01).
 const STATUS = {
   dry: { icon: 'dry', label: 'Dry', cls: '' },
   wet: { icon: 'drop', label: 'Wet', cls: ' wet' },
-  'wet-review-due': { icon: 'review', label: 'Wet recorded · review due', cls: ' open' },
-  'review-due': { icon: 'review', label: 'Review due', cls: ' open' },
+  'review-due': { icon: 'review', label: 'No wake time', cls: ' open' },
   'no-record': { icon: 'missing', label: 'No record', cls: ' open' },
 };
 
@@ -56,7 +55,6 @@ const nightState = {
   note: '',
   error: '',
   undoEvent: null,     // { nightId, event } removed here, restorable from here
-  reviewTouched: null,
   confirmDelete: false,
 };
 
@@ -67,7 +65,7 @@ const edit = {
   error: '', confirmDelete: false,
 };
 
-let pendingNight = null; // { id, note, undoEvent, reviewTouched }
+let pendingNight = null; // { id, note, undoEvent }
 let pendingList = null;  // { undoNight }
 let pendingAddDate = null;
 
@@ -93,8 +91,7 @@ function defaultMonth(doc, now) {
 function list(ctx, draw) {
   const doc = ctx.store.get();
   const rows = monthNightsWithGaps(doc, state.month, ctx.now())
-    .filter(row => state.filter !== 'review'
-      || row.status === 'review-due' || row.status === 'wet-review-due');
+    .filter(row => state.filter !== 'review' || row.status === 'review-due');
 
   return [
     title({ overline: 'One night at a time', name: 'History' }),
@@ -238,7 +235,6 @@ function resetNight(id) {
   nightState.id = id;
   nightState.note = pending?.note ?? '';
   nightState.undoEvent = pending?.undoEvent ?? null;
-  nightState.reviewTouched = pending?.reviewTouched ?? null;
   nightState.error = '';
   nightState.confirmDelete = false;
 }
@@ -262,10 +258,9 @@ function nightDetail(ctx, draw) {
     nightState.note ? h('p', { class: 'saved-note' }, icon('check'), h('span', { text: nightState.note })) : null,
     nightState.undoEvent ? undoEventStrip(ctx, draw) : null,
     nightState.error ? notice({ kind: 'error', title: nightState.error, text: NOT_REMOVED }) : null,
-    reviewNotice(doc, nightState.reviewTouched, id),
     isReviewed(night) ? null : notice({
-      title: 'Review due',
-      text: 'This night has no morning outcome recorded.',
+      title: 'No wake time',
+      text: 'Without one, a night with no wet-bed entry cannot be read as dry.',
       children: [linkRow({ label: `Review ${weekdayNameFor(id)}`, href: `#/morning/${id}`, k: 'review' })],
     }),
     sheet(
@@ -303,11 +298,19 @@ function nightDetail(ctx, draw) {
   ];
 }
 
+// What the record says, and what it is read off — a derived outcome should
+// never look like an answer somebody typed, and a night reviewed before the
+// outcome was derived must not be credited with a wake time it never had.
 function statusLine(night) {
   const status = nightStatus(night);
-  const outcome = { dry: 'Dry night', wet: 'Wet night' }[status];
-  if (outcome) return `${outcome} · morning reviewed`;
-  return status === 'wet-review-due' ? 'Wet recorded · review due' : 'Review due';
+  if (status === 'review-due') return 'No wake time · nobody has recorded this morning yet';
+  if (status === 'wet' && (night?.events ?? []).some(e => e?.type === 'wet')) {
+    return 'Wet night · a wet-bed entry is recorded';
+  }
+  if (status === 'dry' && (night?.morning?.wakeAt ?? null) !== null) {
+    return 'Dry night · no wet-bed entry, and she was up';
+  }
+  return `${status === 'wet' ? 'Wet' : 'Dry'} night · recorded before the outcome was read off the night`;
 }
 
 function eveningLine(night) {
@@ -577,17 +580,10 @@ function save(ctx, draw) {
 
   // Which recorded outcome this save could now contradict: a wet entry
   // arriving on a night, leaving it, or ceasing to be wet. Correcting a wet
-  // entry's detail in place changes neither, so it does not reopen a review.
-  const affected = [];
-  if (isWet && (!wasWet || toId !== fromId)) affected.push(toId);
-  if (wasWet && fromId && (toId !== fromId || !isWet)) affected.push(fromId);
-  const touched = affected.find(nid => isReviewed(findNight(doc, nid))) ?? null;
-
   pendingNight = {
     id: toId,
     note: edit.isNew ? 'Entry added' : 'Entry saved',
     undoEvent: null,
-    reviewTouched: touched,
   };
   // Replace, not push: backing out of the night must not reopen this draft.
   ctx.navigate(`#/night/${toId}`, { replace: true });
@@ -609,7 +605,6 @@ function deleteEventSheet(ctx, draw) {
     button({
       label: 'Delete event', kind: 'danger', k: 'confirm-delete',
       onClick: () => {
-        const reviewed = isReviewed(findNight(ctx.store.get(), fromId));
         let removed = null;
         const result = ctx.store.update(draft => {
           const night = nightForEvent(draft, event.id);
@@ -625,7 +620,6 @@ function deleteEventSheet(ctx, draw) {
           id: fromId,
           note: '',
           undoEvent: { nightId: fromId, event: removed },
-          reviewTouched: reviewed && event.type === 'wet' ? fromId : null,
         };
         ctx.navigate(`#/night/${fromId}`, { replace: true });
       },

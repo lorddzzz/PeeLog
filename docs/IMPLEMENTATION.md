@@ -53,7 +53,7 @@ js/app.js        boot, hash router, tab bar, SW registration, first-run persist(
 js/store.js      the single writer; load / update / subscribe; quota failure
 js/model.js      schema shape, night id and boundary, event helpers, validation
 js/ui.js         shared DOM: chip group, field row, time field, icon, saved strip
-js/tonight.js    T01–T02, E01–E05, minimal morning outcome
+js/tonight.js    T01–T02, E01–E05, the three-phase grid
 js/cards.js      R01 evening, R02 morning, R03 following day          (M2)
 js/history.js    H01–H06 list, night detail, event edit, backfill     (M3)
 js/metrics.js    pure functions over the document, no DOM             (M4)
@@ -196,8 +196,10 @@ before real nights depend on it.
 }
 ```
 
-`morning.outcome !== null` is the definition of *reviewed*. There is no separate
-reviewed flag to fall out of sync with it.
+`morning.outcome !== null` was the definition of *reviewed*. **Superseded on 19
+September 2026** — the outcome is derived from the night's own record and
+nothing writes the field; DESIGN.md §3 has the rule. The schema block above is
+left as M1 built it, retired fields and all.
 
 ### Event
 
@@ -276,7 +278,8 @@ M2 rather than dead.
 ### 1d · Morning outcome
 
 `#/morning/<id>` with the two equal-weight buttons, the wet-conflict flow, and
-the R04 confirmation. The rest of R02 fills in this same route at M2.
+the R04 confirmation. The rest of R02 fills in this same route at M2. (All
+three were removed on 19 September 2026 with the move to a derived outcome.)
 
 ### 1e · Escape hatch
 

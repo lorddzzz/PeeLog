@@ -86,7 +86,6 @@ function coverageLine(c) {
   if (!c.total) return 'No nights recorded in this period.';
   let line = `${c.reviewed} of ${nightsWord(c.total)} reviewed`;
   if (c.unreviewed) line += ` · ${c.unreviewed} incomplete`;
-  if (c.wetRecordedReviewDue) line += ` · ${c.wetRecordedReviewDue} wet recorded, review due`;
   return line;
 }
 
@@ -96,8 +95,8 @@ function coverageLine(c) {
    "Label ... incomplete records, and missing inputs"). */
 
 const EXCLUDE_REASON = {
-  unreviewed: 'not reviewed',
-  reviewDue: 'not reviewed',
+  unreviewed: 'no wake time recorded',
+  reviewDue: 'no wake time recorded',
   unknown: 'not classifiable',
   unknownDrinks: 'no drinks recorded',
   noDinner: 'no dinner time',
@@ -154,9 +153,7 @@ function wetNightsMetric(nights, range) {
 
   if (range.period === '7d') {
     const value = `${w.wet} wet of ${nightsWord(w.reviewed)} reviewed`;
-    const denom = w.unreviewed
-      ? `${w.unreviewed} not reviewed${w.excludedReviewDue ? `, including ${w.excludedReviewDue} with a wet event recorded` : ''}`
-      : null;
+    const denom = w.unreviewed ? `${w.unreviewed} with no wake time recorded` : null;
     return h('div', { class: 'metric' },
       h('h3', { text: 'Wet nights' }),
       h('p', { class: 'value', text: value }),

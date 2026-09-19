@@ -66,10 +66,14 @@ const docOf = (nights, experiments = []) => ({
 });
 
 /* ── Fixture A · five nights, hand-written ──────────────────────────────
-   Small enough to read whole. Carries the awkward cases: a wet outcome with
-   no events, a wet event on an unreviewed night, a confirmed "no drinks"
-   with no dinner time beside it, and a bowel chain whose values differ from
-   both neighbours so an off-by-one shows up as a wrong group. */
+   Small enough to read whole. Carries the awkward cases: a stored wet
+   outcome with no events, a night whose outcome is derived from a wet entry
+   and one derived from a wake time, a confirmed "no drinks" with no dinner
+   time beside it, and a bowel chain whose values differ from both neighbours
+   so an off-by-one shows up as a wrong group.
+
+   Three of the five carry morning.outcome: those are the documents written
+   before the outcome became derived, and the legacy read stays under test. */
 
 const CEST = '+02:00';
 
@@ -98,8 +102,8 @@ function fixtureSmall() {
       evening: { asleepAt: stamp('2026-09-03', 20, 0, CEST) },
       morning: { outcome: 'wet' },
     }),
-    // Wet recorded, review due: the event is real, the night's outcome is not
-    // confirmed, so it is excluded from every finalised rate.
+    // No stored outcome and no wake time: the wet entry settles this night on
+    // its own, so it counts as wet everywhere.
     makeNight('2026-09-04', {
       evening: { asleepAt: stamp('2026-09-04', 21, 0, CEST) },
       day: { stool: 'none' },
@@ -113,7 +117,8 @@ function fixtureSmall() {
         asleepAt: stamp('2026-09-05', 20, 45, CEST),
         lastToiletAt: stamp('2026-09-05', 20, 0, CEST),
       },
-      morning: { outcome: 'dry', eventsComplete: true },
+      // Derived dry: she was up, and nothing wet was recorded.
+      morning: { wakeAt: stamp('2026-09-06', 7, 10, CEST), eventsComplete: true },
       day: { stool: 'loose' },
       events: [
         ['selfToilet', stamp('2026-09-05', 23, 0, CEST), {}],
@@ -315,25 +320,23 @@ export function metricsSelfTests() {
 
   /* ── Fixture A ──────────────────────────────────────────────────── */
 
-  t('A · coverage separates unreviewed from wet-recorded', () => {
+  t('A · every night with a knowable outcome is counted', () => {
     const c = coverage(allOf(small));
     eq(c.total, 5, 'total');
-    eq(c.reviewed, 4, 'reviewed');
-    eq(c.unreviewed, 1, 'unreviewed');
-    eq(c.wetRecordedReviewDue, 1, 'wetRecordedReviewDue');
-    return '5 nights · 4 reviewed · 1 wet recorded, review due';
+    eq(c.reviewed, 5, 'reviewed');   // 4 Sep's wet entry settles it on its own
+    eq(c.unreviewed, 0, 'unreviewed');
+    return '5 nights · 5 with a knowable outcome';
   });
 
-  t('A · wet nights exclude the review-due night', () => {
+  t('A · wet nights count the entry-only night too', () => {
     const w = wetNights(allOf(small));
-    eq(w.wet, 2, 'wet');
-    eq(w.dry, 2, 'dry');
-    eq(w.reviewed, 4, 'reviewed');
-    eq(w.excludedReviewDue, 1, 'excludedReviewDue');
+    eq(w.wet, 3, 'wet');            // 2, 3 and 4 Sep
+    eq(w.dry, 2, 'dry');            // 1 Sep stored, 5 Sep from its wake time
+    eq(w.reviewed, 5, 'reviewed');
     eq(w.rate, null, 'rate');
     eq(w.ratePerWeek, null, 'ratePerWeek');
     eq(w.insufficient, true, 'insufficient');
-    return '2 wet of 4 reviewed, no rate below 10';
+    return '3 wet of 5 reviewed, no rate below 10';
   });
 
   t('A · first wetting: hours, not clock time', () => {
@@ -352,12 +355,11 @@ export function metricsSelfTests() {
 
   t('A · a wet outcome without events is not zero wettings', () => {
     const w = wettingsPerWetNight(allOf(small));
-    eq(w.events, 1, 'events');
-    eq(w.nights, 1, 'nights');
+    eq(w.events, 2, 'events');                       // 2 Sep and 4 Sep
+    eq(w.nights, 2, 'nights');
     eq(w.mean, 1, 'mean');
-    eq(w.excludedNoEvents, 1, 'excludedNoEvents');   // 3 Sep
-    eq(w.excluded.reviewDue, 1, 'reviewDue');        // 4 Sep, unreviewed
-    return '1 wetting over 1 detailed wet night · 1 excluded for no detail';
+    eq(w.excludedNoEvents, 1, 'excludedNoEvents');   // 3 Sep: stored wet, no entries
+    return '2 wettings over 2 detailed wet nights · 1 excluded for no detail';
   });
 
   t('A · noticed counts events, unknowns kept separate', () => {
@@ -374,9 +376,9 @@ export function metricsSelfTests() {
   t('A · asked to pee is independent of the outcome', () => {
     const a = askedToPee(allOf(small));
     eq(a.nights, 1, 'nights');     // 5 Sep, which was dry
-    eq(a.reviewed, 4, 'reviewed');
+    eq(a.reviewed, 5, 'reviewed');
     eq(a.share, null, 'share');
-    return '1 of 4 reviewed nights, counted on a dry night';
+    return '1 of 5 reviewed nights, counted on a dry night';
   });
 
   t('A · confirmed none needs no dinner time; empty drinks is unknown', () => {
@@ -386,10 +388,10 @@ export function metricsSelfTests() {
     eqGroup(d, 'none', 0, 2, 2, 'A drinks');
     eqGroup(d, 'sip', 0, 0, 0, 'A drinks');
     eqGroup(d, 'cup+', 1, 0, 1, 'A drinks');
-    eq(d.excluded.unknownDrinks, 1, 'unknownDrinks');  // 3 Sep: drinks [] and noDrinks null
-    eq(d.excluded.reviewDue, 1, 'reviewDue');          // 4 Sep
+    // 3 and 4 Sep both have drinks [] with noDrinks null — unknown, not none.
+    eq(d.excluded.unknownDrinks, 2, 'unknownDrinks');
     eq(d.insufficient, true, 'insufficient');
-    return 'none 2 · cup+ 1 · 1 unknown · 1 review due';
+    return 'none 2 · cup+ 1 · 2 unknown';
   });
 
   t('A · last-toilet groups by minutes before asleep', () => {
@@ -397,8 +399,7 @@ export function metricsSelfTests() {
     eqGroup(l, 'le30', 0, 1, 1, 'A toilet');     // 1 Sep: 20:00 → 20:30
     eqGroup(l, '31to60', 0, 1, 1, 'A toilet');   // 5 Sep: 20:00 → 20:45
     eqGroup(l, 'gt60', 1, 0, 1, 'A toilet');     // 2 Sep: 19:15 → 20:30
-    eq(l.excluded.unknownTimes, 1, 'unknownTimes');
-    eq(l.excluded.reviewDue, 1, 'reviewDue');
+    eq(l.excluded.unknownTimes, 2, 'unknownTimes');   // 3 and 4 Sep: no last toilet
     return '30 / 45 / 75 minutes land in the three groups';
   });
 
@@ -407,11 +408,10 @@ export function metricsSelfTests() {
     eq(l.measure, 'dry', 'measure');
     eqGroup(l, 'lift', 0, 1, 1, 'A lift');       // 5 Sep
     eqGroup(l, 'noLift', 0, 1, 1, 'A lift');     // 1 Sep, eventsComplete true
-    // 2 and 3 Sep have no lift and no completeness answer: an empty event
+    // 2, 3 and 4 Sep have no lift and no completeness answer: an empty event
     // list cannot establish that no lift happened.
-    eq(l.excluded.incompleteRecord, 2, 'incompleteRecord');
-    eq(l.excluded.reviewDue, 1, 'reviewDue');
-    return 'lift 1 · noLift 1 · 2 nights cannot establish "no lift"';
+    eq(l.excluded.incompleteRecord, 3, 'incompleteRecord');
+    return 'lift 1 · noLift 1 · 3 nights cannot establish "no lift"';
   });
 
   t('A · bowel overlay reads night N−1’s day, not N’s and not N+1’s', () => {
@@ -423,8 +423,8 @@ export function metricsSelfTests() {
     eqGroup(b, 'normal', 1, 0, 1, 'A bowel');    // 3 Sep, from 2 Sep's day
     eqGroup(b, 'none', 0, 1, 1, 'A bowel');      // 5 Sep, from 4 Sep's day
     eqGroup(b, 'loose', 0, 0, 0, 'A bowel');     // 5 Sep's own day feeds nobody
-    eq(b.excluded.noRecord, 1, 'noRecord');      // 1 Sep, no 31 Aug in the doc
-    eq(b.excluded.reviewDue, 1, 'reviewDue');
+    // 1 Sep has no 31 Aug in the doc; 4 Sep's previous day (3 Sep) has no stool.
+    eq(b.excluded.noRecord, 2, 'noRecord');
     return '2 Sep → hard (1 Sep’s day); own day normal, next day null';
   });
 
@@ -531,16 +531,16 @@ export function metricsSelfTests() {
   t('C · coverage and rate over sixty mixed nights', () => {
     const c = coverage(allOf(large));
     eq(c.total, 60, 'total');
-    eq(c.reviewed, 54, 'reviewed');
-    eq(c.unreviewed, 6, 'unreviewed');
-    eq(c.wetRecordedReviewDue, 2, 'wetRecordedReviewDue');
+    // The two nights with a wet entry and no stored outcome (i 9 and 19) are
+    // settled by the entry, so only the four with neither are left out.
+    eq(c.reviewed, 56, 'reviewed');
+    eq(c.unreviewed, 4, 'unreviewed');
     const w = wetNights(allOf(large));
-    eq(w.wet, 18, 'wet');
+    eq(w.wet, 20, 'wet');
     eq(w.dry, 36, 'dry');
-    eq(w.rate, 1 / 3, 'rate');
-    eq(w.ratePerWeek, 2.33, 'ratePerWeek');
-    eq(w.excludedReviewDue, 2, 'excludedReviewDue');
-    return '18 wet of 54 reviewed · 2.33 per week · 6 unreviewed';
+    eq(w.rate, 20 / 56, 'rate');
+    eq(w.ratePerWeek, 2.5, 'ratePerWeek');
+    return '20 wet of 56 reviewed · 2.5 per week · 4 with no wake time';
   });
 
   t('C · timing excludes missing asleep and out-of-order stamps', () => {
@@ -551,13 +551,13 @@ export function metricsSelfTests() {
     eq(f.points.length, 10, 'points');
     eq(f.median, 4, 'median');
     eq(f.insufficient, false, 'exactly ten points is enough');
+    // i 9 brings two wettings and i 19 one, on top of the 18 already counted.
     const w = wettingsPerWetNight(allOf(large));
-    eq(w.events, 18, 'events');
-    eq(w.nights, 12, 'nights');
+    eq(w.events, 21, 'events');
+    eq(w.nights, 14, 'nights');
     eq(w.mean, 1.5, 'mean');
     eq(w.excludedNoEvents, 6, 'excludedNoEvents');
-    eq(w.excluded.reviewDue, 2, 'reviewDue');
-    return '10 points, median 4 h · 18 wettings over 12 nights';
+    return '10 points, median 4 h · 21 wettings over 14 nights';
   });
 
   t('C · noticed and asked to pee', () => {
@@ -569,49 +569,50 @@ export function metricsSelfTests() {
     eq(n.share, 3 / 14, 'share');
     const a = askedToPee(allOf(large));
     eq(a.nights, 12, 'nights');
-    eq(a.reviewed, 54, 'reviewed');
-    eq(a.share, 12 / 54, 'share');
-    return '3 of 14 known · asked on 12 of 54';
+    eq(a.reviewed, 56, 'reviewed');
+    eq(a.share, 12 / 56, 'share');
+    return '3 of 14 known · asked on 12 of 56';
   });
 
   t('C · drinks: four different exclusion reasons', () => {
     const d = drinksComparison(allOf(large));
     eqGroup(d, 'none', 6, 10, 16, 'C drinks');
-    eqGroup(d, 'sip', 4, 6, 10, 'C drinks');
+    eqGroup(d, 'sip', 5, 6, 11, 'C drinks');   // i 9 drinks a sip after dinner
     eqGroup(d, 'cup+', 4, 9, 13, 'C drinks');
-    eq(d.excluded.unknownDrinks, 12, 'unknownDrinks');
+    eq(d.excluded.unknownDrinks, 13, 'unknownDrinks');  // i 19 has drinks []
     eq(d.excluded.noDinner, 1, 'noDinner');
     eq(d.excluded.unknownDrinkTime, 1, 'unknownDrinkTime');
     eq(d.excluded.unknownDrinkSize, 1, 'unknownDrinkSize');
-    eq(d.excluded.reviewDue, 6, 'reviewDue');
-    eq(group(d, 'sip').rate, 0.4, 'sip rate at exactly ten');
+    eq(d.excluded.reviewDue, 4, 'reviewDue');
+    eq(group(d, 'sip').rate, 5 / 11, 'sip rate');
     eq(d.insufficient, false, 'insufficient');
-    return 'none 16 · sip 10 · cup+ 13 · 21 excluded across five reasons';
+    return 'none 16 · sip 11 · cup+ 13 · 20 excluded across five reasons';
   });
 
   t('C · last toilet, lifts and bowel', () => {
     const l = lastToiletComparison(allOf(large));
     eqGroup(l, 'le30', 7, 14, 21, 'C toilet');
-    eqGroup(l, '31to60', 5, 10, 15, 'C toilet');
+    eqGroup(l, '31to60', 6, 10, 16, 'C toilet');  // i 9: 19:15 → 20:00
     eqGroup(l, 'gt60', 3, 7, 10, 'C toilet');
-    eq(l.excluded.unknownTimes, 7, 'unknownTimes');
+    eq(l.excluded.unknownTimes, 8, 'unknownTimes');  // i 19 has no asleep time
     eq(l.excluded.invalidOrder, 1, 'invalidOrder');
-    eq(l.excluded.reviewDue, 6, 'reviewDue');
+    eq(l.excluded.reviewDue, 4, 'reviewDue');
 
     const f = liftComparison(allOf(large));
-    eqGroup(f, 'lift', 4, 8, 12, 'C lift');
-    eqGroup(f, 'noLift', 14, 14, 28, 'C lift');
+    eqGroup(f, 'lift', 5, 8, 13, 'C lift');       // i 9 was lifted
+    eqGroup(f, 'noLift', 15, 14, 29, 'C lift');   // i 19, events complete
     eq(f.excluded.incompleteRecord, 14, 'incompleteRecord');
-    eq(group(f, 'lift').rate, 8 / 12, 'lift dry rate');
+    eq(group(f, 'lift').rate, 8 / 13, 'lift dry rate');
 
     const b = bowelComparison(allOf(large), large);
     eqGroup(b, 'none', 4, 8, 12, 'C bowel');
     eqGroup(b, 'hard', 4, 8, 12, 'C bowel');
-    eqGroup(b, 'normal', 2, 4, 6, 'C bowel');
+    // i 9 and i 19 both follow a 'normal' day, and both are wet.
+    eqGroup(b, 'normal', 4, 4, 8, 'C bowel');
     eqGroup(b, 'loose', 3, 8, 11, 'C bowel');
-    eq(group(b, 'normal').rate, null, 'six nights is not a rate');
+    eq(group(b, 'normal').rate, null, 'eight nights is not a rate');
     eq(b.excluded.noRecord, 13, 'noRecord');
-    return 'toilet 21/15/10 · lift 12/28 · bowel 12/12/6/11';
+    return 'toilet 21/16/10 · lift 13/29 · bowel 12/12/8/11';
   });
 
   t('C · routine windows are never stretched to fill', () => {
@@ -621,7 +622,7 @@ export function metricsSelfTests() {
     eq(ongoing.before.fromId, '2026-05-31', 'before from');
     eq(ongoing.before.toId, '2026-06-30', 'before to');
     eq(ongoing.during.reviewed, 27, 'during reviewed');
-    eq(ongoing.before.reviewed, 27, 'before reviewed');
+    eq(ongoing.before.reviewed, 29, 'before reviewed');  // i 9 and 19 land here
     eq(ongoing.insufficient, false, 'ongoing insufficient');
 
     const ended = routineComparison(large, large.experiments[1], new Date(2026, 7, 1, 20, 0));
@@ -634,7 +635,7 @@ export function metricsSelfTests() {
     // rather than being made up by widening the window.
     eq(ended.before.total, 9, 'before nights actually recorded');
     eq(ended.before.reviewed, 9, 'before reviewed');
-    eq(ended.during.reviewed, 9, 'during reviewed');
+    eq(ended.during.reviewed, 11, 'during reviewed');  // i 9 and 19 bound it
     eq(ended.insufficient, true, 'ended insufficient');
     return 'ongoing 31+31 nights · ended 11+11 with only 9 recorded before';
   });
@@ -708,14 +709,17 @@ export function metricsSelfTests() {
     assert(s.includes('15 wet of 30 nights reviewed'), `wetNights text: ${s}`);
     assert(s.includes('50%') && s.includes('3.5 wet nights per week'), `wetNights text: ${s}`);
 
-    const small4 = textEquivalent(wetNights(allOf(small)));
-    assert(small4.includes('2 wet of 4 nights reviewed'), `small text: ${small4}`);
-    assert(small4.includes('Not enough recorded nights'), `small text: ${small4}`);
-    assert(!small4.includes('%'), `a rate leaked below the threshold: ${small4}`);
-    // Review-due nights are named once, inside the unreviewed clause.
-    assert(small4.includes('1 night is not reviewed and excluded, including 1 with a wet event recorded'),
-      `review-due wording: ${small4}`);
-    assert(small4.match(/not reviewed/g).length === 1, `"not reviewed" counted twice: ${small4}`);
+    const small5 = textEquivalent(wetNights(allOf(small)));
+    assert(small5.includes('3 wet of 5 nights reviewed'), `small text: ${small5}`);
+    assert(small5.includes('Not enough recorded nights'), `small text: ${small5}`);
+    assert(!small5.includes('%'), `a rate leaked below the threshold: ${small5}`);
+    // Every night in the fixture has a knowable outcome, so nothing is excluded
+    // and the sentence must not invent a clause saying otherwise.
+    assert(!small5.includes('excluded'), `an empty exclusion clause was printed: ${small5}`);
+
+    // Fixture C does have nights nobody was up on, and names why they are out.
+    const big = textEquivalent(wetNights(allOf(large)));
+    assert(big.includes('4 nights have no wake time recorded and are excluded'), `large text: ${big}`);
 
     const f = textEquivalent(firstWetting(allOf(large)));
     assert(f.includes('median 4 hours across 10 nights'), `firstWetting text: ${f}`);

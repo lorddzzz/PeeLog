@@ -200,7 +200,7 @@ function sheetFor(d, noteBlock) {
       ['Woke and noticed the wetting',
         seen.known ? `${of(seen.self, seen.known)} known events · ${seen.unknown} unknown` : 'No record'],
       ['Wet nights missing event detail', `${perNight.excludedNoEvents} of ${wet.wet} wet nights`],
-      ['Nights with a wet entry but no review', String(wet.excludedReviewDue)],
+      ['Nights with no wake time recorded', String(wet.unreviewed)],
     ]),
 
     h('div', { class: 'twocol' },

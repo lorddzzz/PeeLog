@@ -200,8 +200,8 @@ const METRIC_TITLE = {
 };
 
 const REASON = {
-  reviewDue: 'not reviewed',
-  unreviewed: 'not reviewed',
+  reviewDue: 'no wake time recorded',
+  unreviewed: 'no wake time recorded',
   unknown: 'not classifiable',
   unknownDrinks: 'no drinks recorded',
   noDinner: 'no dinner time',
@@ -241,19 +241,15 @@ export function textEquivalent(result) {
   switch (r.kind) {
     case 'coverage':
       return `${r.reviewed} of ${nights(r.total)} reviewed.`
-        + (r.unreviewed ? ` ${r.unreviewed} not reviewed, of which ${r.wetRecordedReviewDue} `
-          + `${r.wetRecordedReviewDue === 1 ? 'has' : 'have'} a wet event recorded.` : '');
+        + (r.unreviewed ? ` ${r.unreviewed} ${r.unreviewed === 1 ? 'has' : 'have'} no wake time recorded.` : '');
 
     case 'wetNights':
       return (r.insufficient
         ? `${r.wet} wet of ${nights(r.reviewed)} reviewed. ${INSUFFICIENT}.`
         : `${r.wet} wet of ${nights(r.reviewed)} reviewed (${pct(r.rate)}), `
           + `equivalent to ${num(r.ratePerWeek)} wet nights per week.`)
-        // Review-due nights are a subset of the unreviewed ones, so they are
-        // named inside that clause rather than counted again beside it.
         + (r.unreviewed
-          ? ` ${r.unreviewed} ${r.unreviewed === 1 ? 'night is' : 'nights are'} not reviewed and excluded`
-            + `${r.excludedReviewDue ? `, including ${r.excludedReviewDue} with a wet event recorded` : ''}.`
+          ? ` ${r.unreviewed} ${r.unreviewed === 1 ? 'night has' : 'nights have'} no wake time recorded and ${r.unreviewed === 1 ? 'is' : 'are'} excluded.`
           : '');
 
     case 'wetNightsByWeek':

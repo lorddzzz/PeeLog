@@ -1,17 +1,17 @@
-// R01 evening, R02 morning, R03 following day (IMPLEMENTATION.md §2). R02's
-// one-tap outcome, conflict flow and R04 confirmation are M1 (commit 1d) and
-// stay exactly as they were; M2 fills in the rest of all three cards.
+// R01 evening, R02 morning, R03 following day (IMPLEMENTATION.md §2). R02 no
+// longer records an outcome: nightStatus derives it from the night's own
+// record, so the card asks only what nothing else can tell it.
 
 import {
   DAY_FIELDS, EVENING_FIELDS, MORNING_FIELDS, activeExperiment, addDrink,
   dayDateFor, dayLabelFor, daysSince, ensureNight, findDrink, findNight,
-  newDrink, nightIdFor, openNight, outcomeConflict, removeDrink,
+  isReviewed, newDrink, nightIdFor, openNight, removeDrink,
   setNoDrinks, suggestedEveningTimes, timeLabelFor, toggleSleepSign,
   weekdayNameFor,
 } from './model.js';
 import {
-  button, checkbox, chipGroup, h, icon, linkRow, notice, paint, savedStrip,
-  stepper, textField, timeField, title,
+  button, checkbox, chipGroup, h, icon, notice, paint, stepper, textField,
+  timeField, title,
 } from './ui.js';
 
 const NOT_SAVED = 'There isn’t enough space to save this. Keep this screen open and try again.';
@@ -50,25 +50,18 @@ function writeDetail(ctx, mutate, cardState, draw) {
   draw();
 }
 
-/* ── Morning (R02) ──────────────────────────────────────────────────────
-   state.failure / state.conflict are the M1 outcome flow and keep their
-   original shape untouched; detailNote/detailFailure carry the new "little
-   more detail" fields below it, on the shared shape above. */
+/* ── Morning (R02) ──────────────────────────────────────────────────── */
 
 const state = {
   nightId: null,
-  conflict: null, // the wet event a Dry tap was refused against
-  failure: null,  // the outcome a failed write should retry
-  detailNote: '',
-  detailFailure: null,
+  note: '',
+  failure: null,
 };
 
 function reset(nightId) {
   state.nightId = nightId;
-  state.conflict = null;
+  state.note = '';
   state.failure = null;
-  state.detailNote = '';
-  state.detailFailure = null;
   nudge.later = false;
 }
 
@@ -76,32 +69,7 @@ function reset(nightId) {
    ensureNight, never openNight: a morning review does not reopen the night
    for logging, so activeNightId is left exactly where it was. */
 
-function writeOutcome(ctx, outcome, draw) {
-  const result = ctx.store.update(draft => {
-    ensureNight(draft, state.nightId).morning.outcome = outcome;
-  });
-  if (!result.ok) {
-    state.failure = outcome;
-    draw();
-    return;
-  }
-  state.failure = null;
-  draw();
-}
-
-// Tapping the outcome already recorded does nothing — it is never cleared to
-// unknown from here, only changed by an explicit alternative tap.
-function tapOutcome(ctx, night, outcome, draw) {
-  if ((night?.morning?.outcome ?? null) === outcome) return;
-  if (outcome === 'dry') {
-    const conflict = outcomeConflict(night, 'dry');
-    if (conflict) { state.conflict = conflict; draw(); return; }
-  }
-  state.conflict = null;
-  writeOutcome(ctx, outcome, draw);
-}
-
-// The "little more detail" fields never reopen the night for logging either.
+// The morning fields never reopen the night for logging either.
 function writeMorningDetail(ctx, fn, draw) {
   writeDetail(ctx, draft => fn(ensureNight(draft, state.nightId).morning), state, draw);
 }
@@ -119,7 +87,6 @@ function morning(ctx, draw) {
   // view, so a stranger's link or a fresh id must still render normally.
   const night = findNight(ctx.store.get(), id);
   const wetEvents = (night?.events ?? []).filter(e => e.type === 'wet');
-  const outcome = night?.morning?.outcome ?? null;
   const m = night?.morning ?? { wakeAt: null, mood: null, sleepSigns: null, eventsComplete: null, note: '' };
 
   return [
@@ -128,14 +95,9 @@ function morning(ctx, draw) {
       name: 'Morning check-in',
       lead: 'How was the night?',
     }),
-    wetEvents.length ? h('p', { class: 'context', text: wetContextLine(wetEvents) }) : null,
-    h('div', { class: 'grid' },
-      outcomeButton(ctx, night, 'dry', 'Dry night', 'dry', draw),
-      outcomeButton(ctx, night, 'wet', 'Wet night', 'drop', draw)),
-    state.conflict ? conflictNotice(ctx, draw) : null,
-    state.failure ? failureNotice(ctx, draw) : null,
-    outcome ? confirmation(ctx, draw) : null,
-    h('h3', { text: 'A little more detail' }),
+    h('p', { class: 'context', text: wetEvents.length ? wetContextLine(wetEvents) : outcomeLine(night) }),
+    // Woke at leads the card: with no wet entry it is the whole difference
+    // between a dry night and one nobody was there for (DESIGN.md §4.1).
     timeField({
       label: 'Woke at', value: m.wakeAt, dates: dayDateFor(id), k: 'wake',
       onCommit: iso => writeMorningDetail(ctx, morn => { morn.wakeAt = iso; }, draw),
@@ -159,8 +121,19 @@ function morning(ctx, draw) {
       onCommit: text => writeMorningDetail(ctx, morn => { morn.note = text; }, draw),
     }),
     detailNote(state),
+    // DESIGN.md §9.3 puts the Sunday nudge after the outcome is known, never
+    // in front of the fields that make it knowable.
+    isReviewed(night) ? backupNudge(ctx, draw) : null,
     button({ label: 'Done', k: 'done', kind: 'primary', onClick: () => ctx.back() }),
   ];
+}
+
+// What the record already says, so the card never reads as if it were still
+// asking. Only reached when there is no wet entry to describe instead.
+function outcomeLine(night) {
+  return isReviewed(night)
+    ? 'No wet-bed entry recorded · this night reads as dry'
+    : 'No wet-bed entry recorded · add a wake time and this night reads as dry';
 }
 
 function wetContextLine(events) {
@@ -170,61 +143,9 @@ function wetContextLine(events) {
     : `${events.length} wet-bed entries recorded · first at ${first}`;
 }
 
-function outcomeButton(ctx, night, value, label, iconName, draw) {
-  const selected = (night?.morning?.outcome ?? null) === value;
-  return h('button', {
-    class: `action${selected ? ' selected' : ''}`,
-    type: 'button',
-    k: `outcome-${value}`,
-    'aria-pressed': selected ? 'true' : 'false',
-    'on:click': () => tapOutcome(ctx, night, value, draw),
-  }, icon(iconName), h('span', { text: label }));
-}
-
-// Dry can never erase the mistaken record — only review or an explicit Wet
-// tap moves the outcome past this point.
-function conflictNotice(ctx, draw) {
-  const event = state.conflict;
-  return notice({
-    kind: 'warm',
-    title: 'This night includes a wet-bed entry.',
-    text: 'Review the entry before marking the night dry.',
-    children: [
-      linkRow({ label: 'Review entries', href: `#/event/${event.id}`, k: 'review-entries' }),
-      button({
-        label: 'Keep wet night', k: 'keep-wet',
-        onClick: () => { state.conflict = null; writeOutcome(ctx, 'wet', draw); },
-      }),
-    ],
-  });
-}
-
-function failureNotice(ctx, draw) {
-  const outcome = state.failure;
-  return notice({
-    kind: 'error',
-    title: 'Not saved',
-    text: NOT_SAVED,
-    children: [
-      button({ label: 'Retry saving', k: 'retry', onClick: () => writeOutcome(ctx, outcome, draw) }),
-    ],
-  });
-}
-
-// R04: same treatment whether the outcome is Dry or Wet, and the buttons
-// above stay visible and editable — this is a confirmation, not a hand-off
-// to a different screen.
-function confirmation(ctx, draw) {
-  return h('div', {},
-    savedStrip({ text: 'Night outcome recorded', detail: 'Morning review saved' }),
-    // The weekly nudge sits below the confirmation, never above the outcome
-    // (R04), and only on a Sunday morning.
-    backupNudge(ctx, draw));
-}
-
 // DESIGN.md §9.3: one quiet Sunday offer, dismissible for this visit. A
-// backup nobody has confirmed saving counts as none. Exported: the outcome
-// is usually recorded on Tonight's day phase now, and the nudge follows it.
+// backup nobody has confirmed saving counts as none. Exported: Tonight's day
+// phase shows the same nudge once the night's outcome is known.
 const nudge = { later: false };
 
 export function backupNudge(ctx, draw) {

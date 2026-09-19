@@ -9,7 +9,7 @@ import {
   eveningSummaryFor, eventSummary, exportFileName, findNight, firstWetTime,
   insertEvent, isReviewed, isUntouchedNight, latestEvent, migrate,
   monthNightsWithGaps, moveEventTo, newDrink, newEvent, newNight, nightIdFor,
-  nightIdForIso, nightStatus, openNight, outcomeConflict, parseIso,
+  nightIdForIso, nightStatus, openNight, outcomeOf, parseIso,
   pendingReviewFor, phaseFor, dayOwnerId, prevNightId, removeDrink, undoAction, removeEvent, restoreNight,
   retypeEvent, setNoDrinks, stepValue, suggestedEveningTimes, toggleSleepSign,
   toIso, validateDoc,
@@ -338,7 +338,7 @@ export function runSelfTests() {
     let a = activeNightFor(doc, now);
     assert(a.id === '2026-09-13', `events would land in ${a.id}`);
     assert(a.stale === '2026-09-12', 'the unreviewed night was not carried forward');
-    findNight(doc, '2026-09-12').morning.outcome = 'dry';
+    findNight(doc, '2026-09-12').morning.wakeAt = '2026-09-13T07:10:00+02:00';
     a = activeNightFor(doc, now);
     assert(a.stale === null, 'a reviewed night is still asking for review');
     openNight(doc, '2026-09-13');
@@ -352,7 +352,9 @@ export function runSelfTests() {
     // insert. The unreviewed night must keep its own events and gain none.
     const doc = emptyDoc();
     const yesterday = openNight(doc, '2026-09-12');
-    insertEvent(yesterday, newEvent('wet', '2026-09-13T02:00:00+02:00'));
+    // A lift, not a wetting: a wet entry would settle the night's outcome on
+    // its own and the night would no longer be waiting for anything.
+    insertEvent(yesterday, newEvent('lift', '2026-09-13T02:00:00+02:00'));
 
     const now = new Date(2026, 8, 13, 23, 40);
     const active = activeNightFor(doc, now);
@@ -367,7 +369,7 @@ export function runSelfTests() {
     assert(activeNightFor(doc, now).stale === null, 'activeNightFor still reports the night it left');
     assert(pendingReviewFor(doc, '2026-09-13') === '2026-09-12', 'the review link disappeared after logging');
 
-    findNight(doc, '2026-09-12').morning.outcome = 'wet';
+    findNight(doc, '2026-09-12').morning.wakeAt = '2026-09-13T07:10:00+02:00';
     assert(pendingReviewFor(doc, '2026-09-13') === null, 'a reviewed night still asks for review');
     assert(pendingReviewFor(doc, '2026-09-12') === null, 'a night that was never recorded asks for review');
     return 'Logged into 09-13; 09-12 keeps its event and its review link';
@@ -419,7 +421,8 @@ export function runSelfTests() {
     };
     assert(touch(n => insertEvent(n, newEvent('wet', '2026-09-14T02:12:00+02:00'))) === false, 'an event');
     assert(touch(n => { n.experimentId = 'x-1'; }) === false, 'an assigned routine');
-    assert(touch(n => { n.morning.outcome = 'dry'; }) === false, 'a recorded outcome');
+    assert(touch(n => { n.morning.outcome = 'dry'; }) === false, 'an outcome recorded before it was derived');
+    assert(touch(n => { n.morning.wakeAt = '2026-09-14T07:10:00+02:00'; }) === false, 'a wake time');
     assert(touch(n => { n.day.accidents = 0; }) === false, 'an answered 0');
     assert(touch(n => { n.evening.asleepEstimated = true; }) === false, 'an estimated flag');
     assert(touch(n => { n.evening.note = 'late nap'; }) === false, 'a note');
@@ -600,20 +603,36 @@ export function runSelfTests() {
     return "'Wet bed · soaked' · 'She asked to pee · made it'";
   });
 
-  t('A Dry outcome conflicts with a recorded wet event', () => {
-    const night = newNight('2026-09-13');
-    assert(outcomeConflict(night, 'dry') === null, 'no wet events still conflicted');
-    assert(isReviewed(night) === false, 'an unset outcome was reviewed');
+  t('The outcome is read off the record, never tapped', () => {
+    // The rule the Dry / Wet buttons were removed in favour of (DESIGN.md
+    // §4.1). Each half has to fail for its own reason, so they are asserted
+    // one at a time rather than on one fully-populated night.
+    const blank = newNight('2026-09-13');
+    assert(outcomeOf(blank) === null, 'an empty night claimed an outcome');
+    assert(isReviewed(blank) === false, 'an empty night was reviewed');
 
-    const wet = newEvent('wet', '2026-09-14T02:12:00+02:00');
-    insertEvent(night, wet);
-    const conflict = outcomeConflict(night, 'dry');
-    assert(conflict && conflict.id === wet.id, 'the wet event was not returned as the conflict');
-    assert(outcomeConflict(night, 'wet') === null, 'Wet conflicted with its own wet event');
+    // A wake time with no wet entry is the only thing that makes dry mean
+    // "she was dry" rather than "nobody logged".
+    const dry = newNight('2026-09-13');
+    insertEvent(dry, newEvent('lift', '2026-09-14T01:00:00+02:00'));
+    assert(outcomeOf(dry) === null, 'a night nobody was up on read as dry');
+    dry.morning.wakeAt = '2026-09-14T07:10:00+02:00';
+    assert(outcomeOf(dry) === 'dry', 'a wake time with no wet entry did not read dry');
 
-    night.morning.outcome = 'dry';
-    assert(isReviewed(night), 'a dry outcome was not reviewed');
-    return 'dry + wet event conflicts; wet and no-events never do';
+    // A wet entry is positive evidence and settles the night on its own.
+    const wet = newNight('2026-09-13');
+    insertEvent(wet, newEvent('wet', '2026-09-14T02:12:00+02:00'));
+    assert(outcomeOf(wet) === 'wet', 'a wet entry did not make the night wet');
+    assert(isReviewed(wet), 'a wet entry did not settle the night');
+
+    // A document written before the change still answers from what it stored,
+    // and a wet entry still outranks it — a stored dry can never hide one.
+    const stored = newNight('2026-09-12');
+    stored.morning.outcome = 'dry';
+    assert(outcomeOf(stored) === 'dry', 'a stored outcome stopped being read');
+    insertEvent(stored, newEvent('wet', '2026-09-13T02:12:00+02:00'));
+    assert(outcomeOf(stored) === 'wet', 'a stored dry hid a wet entry');
+    return 'wet entry > stored outcome > wake time · nothing else is reviewed';
   });
 
   t('Export filename', () => {
@@ -778,12 +797,12 @@ export function runSelfTests() {
     assert(byId['2026-09-12'].kind === 'no-record' && byId['2026-09-12'].status === 'no-record',
       'a date with no record did not read as one');
     assert(byId['2026-09-11'].status === 'dry', 'a recorded dry night lost its outcome');
-    assert(byId['2026-09-13'].status === 'wet-review-due', 'a wet entry without a review read as a confirmed outcome');
+    assert(byId['2026-09-13'].status === 'wet', 'a wet entry did not read as a wet night');
     assert(rows.filter(r => r.kind === 'night').length === 2, 'a gap was counted as a night');
     return '09-13 … 09-01, no 09-14 (tonight) and no future dates; gaps read no-record';
   });
 
-  t('Night status tells the four states apart', () => {
+  t('Night status tells the three states apart', () => {
     const blank = newNight('2026-09-13');
     assert(nightStatus(blank) === 'review-due', 'an untouched night was not review due');
     assert(firstWetTime(blank) === null, 'an empty night reported a wetting');
@@ -791,17 +810,15 @@ export function runSelfTests() {
     const wet = newNight('2026-09-13');
     insertEvent(wet, newEvent('wet', '2026-09-14T02:12:00+02:00'));
     insertEvent(wet, newEvent('lift', '2026-09-13T23:00:00+02:00'));
-    assert(nightStatus(wet) === 'wet-review-due', 'a wet entry without a review was not flagged for review');
+    assert(nightStatus(wet) === 'wet', 'a wet entry did not read as a wet night');
     assert(firstWetTime(wet) === '2026-09-14T02:12:00+02:00', `first wetting: ${firstWetTime(wet)}`);
     assert(eventCounts(wet).wet === 1 && eventCounts(wet).lift === 1 && eventCounts(wet).drink === 0,
       `counts: ${JSON.stringify(eventCounts(wet))}`);
 
-    wet.morning.outcome = 'wet';
-    assert(nightStatus(wet) === 'wet', 'a reviewed wet night was not wet');
     const dry = newNight('2026-09-12');
-    dry.morning.outcome = 'dry';
-    assert(nightStatus(dry) === 'dry', 'a reviewed dry night was not dry');
-    return 'review-due · wet-review-due · wet · dry';
+    dry.morning.wakeAt = '2026-09-13T07:10:00+02:00';
+    assert(nightStatus(dry) === 'dry', 'a night she was up on, with no wet entry, was not dry');
+    return 'review-due · wet · dry';
   });
 
   t('A deleted night comes back where it was', () => {
@@ -911,7 +928,8 @@ export function runSelfTests() {
     const at = name => back[1][header.indexOf(name)];
     assert(back.length === 2, `expected one night row, got ${back.length - 1}`);
     assert(at('morning_note') === note, 'the note did not round-trip');
-    assert(at('outcome') === '', 'an unreviewed night exported an outcome');
+    // Derived, like everywhere else: two wet entries make this night wet.
+    assert(at('outcome') === 'wet', `outcome exported as ${at('outcome')}, expected wet`);
     assert(at('day_accidents') === '0', 'a recorded zero came back blank');
     assert(at('changes_recorded') === '1', `changes_recorded was ${at('changes_recorded')}, expected 1 — only the entry with something changed`);
     assert(header.indexOf('changes') === -1 && header.indexOf('wore') === -1, 'a retired column is still exported');

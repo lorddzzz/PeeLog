@@ -14,7 +14,7 @@
 // `null` in the document means nobody answered. `false`, `0` and `'none'` mean
 // someone did. Every denominator here depends on telling those apart.
 
-import { findNight, isReviewed, nightIdFor, parseIso, prevNightId, shiftDate } from './model.js';
+import { findNight, isReviewed, nightIdFor, outcomeOf, parseIso, prevNightId, shiftDate } from './model.js';
 
 export const MIN_ELIGIBLE = 10;
 
@@ -28,8 +28,6 @@ const msOf = iso => parseIso(iso)?.ms ?? null;
 const round = (x, p = 2) => Math.round(x * 10 ** p) / 10 ** p;
 
 const wetEvents = night => (night?.events ?? []).filter(e => e?.type === 'wet');
-
-const outcomeOf = night => night?.morning?.outcome ?? null;
 
 const median = xs => {
   if (!xs.length) return null;
@@ -75,34 +73,29 @@ export function nightsInRange(doc, fromId, toId) {
 
 export function coverage(nights) {
   let reviewed = 0;
-  let wetRecordedReviewDue = 0;
   for (const n of nights) {
     if (isReviewed(n)) reviewed++;
-    else if (wetEvents(n).length) wetRecordedReviewDue++;
   }
   return {
     kind: 'coverage',
     total: nights.length,
     reviewed,
     unreviewed: nights.length - reviewed,
-    wetRecordedReviewDue,
   };
 }
 
 /* ── Wet nights ─────────────────────────────────────────────────────── */
 
-// A wet event on an unreviewed night is "Wet recorded, review due": the event
-// happened, but nobody confirmed the night's outcome, so it cannot join a
-// finalised rate in either direction.
+// A wet entry decides its night on its own, so no wet event can sit outside
+// this rate any more; what is excluded is a night nobody has been up on, and
+// that says nothing in either direction.
 export function wetNights(nights) {
   let wet = 0;
   let dry = 0;
-  let reviewDue = 0;
   for (const n of nights) {
     const outcome = outcomeOf(n);
     if (outcome === 'wet') wet++;
     else if (outcome === 'dry') dry++;
-    else if (wetEvents(n).length) reviewDue++;
   }
   const reviewed = wet + dry;
   const unreviewed = nights.length - reviewed;
@@ -115,9 +108,6 @@ export function wetNights(nights) {
     reviewed,
     eligible: reviewed,
     unreviewed,
-    // A subset of `unreviewed`, not a further exclusion: these are the nights
-    // the screen names "Wet recorded, review due".
-    excludedReviewDue: reviewDue,
     excluded: { unreviewed },
     rate: enough ? wet / reviewed : null,
     ratePerWeek: enough ? round((wet / reviewed) * 7) : null,
@@ -189,12 +179,10 @@ export function wettingsPerWetNight(nights) {
   let events = 0;
   let detailed = 0;
   let noEvents = 0;
-  let reviewDue = 0;
   for (const n of nights) {
     const count = wetEvents(n).length;
-    if (outcomeOf(n) === 'wet') {
-      if (count) { events += count; detailed++; } else noEvents++;
-    } else if (outcomeOf(n) === null && count) reviewDue++;
+    if (outcomeOf(n) !== 'wet') continue;
+    if (count) { events += count; detailed++; } else noEvents++;
   }
   return {
     kind: 'wettingsPerWetNight',
@@ -202,7 +190,7 @@ export function wettingsPerWetNight(nights) {
     nights: detailed,
     eligible: detailed,
     excludedNoEvents: noEvents,
-    excluded: { noEvents, reviewDue },
+    excluded: { noEvents },
     mean: detailed ? round(events / detailed) : null,
     insufficient: detailed < MIN_ELIGIBLE,
   };

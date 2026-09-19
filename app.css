@@ -297,7 +297,6 @@ body.no-art .title-art img { display: none; }
 
 /* A recorded morning outcome (R02): persists after the tap, unlike the
    momentary :active state below. */
-.action.selected { background: var(--raised); border-color: var(--accent); }
 
 /* iOS Safari has no Vibration API, so tap confirmation must be visual. */
 .action:active { background: var(--raised); transform: scale(0.97); }

@@ -7,7 +7,8 @@ documented in [UX-HANDOFF.md](UX-HANDOFF.md), with a [screen atlas](ux/index.htm
 and [asset library](ux/ASSETS.md). That handoff supersedes this document's earlier
 visual and interaction proposals — except where §4 below has since moved on
 (17 September 2026: Tonight's three phases, the retired fields, and the
-one-back-button navigation), which is now the rule.
+one-back-button navigation; 19 September 2026: the derived outcome), which is
+now the rule.
 
 **Build plan:** [IMPLEMENTATION.md](IMPLEMENTATION.md) — module map, milestone
 pass/fail bars, and the record of how the two specs were reconciled. The
@@ -94,7 +95,9 @@ Keyed by the date of the **evening**. The night of Sep 13 → morning of Sep 14 
   "events": [ /* Event, sorted by t */ ],
 
   "morning": {
-    "outcome": null,                 // null review due | dry | wet — confirmed, never derived
+    // Derived, not stored — see below. Kept in the schema because documents
+    // written before 19 September 2026 carry it, and it still answers for them.
+    "outcome": null,                 // null | dry | wet
     "wakeAt": null,
     "mood": null,                    // upset | ok | happy
     "sleepSigns": null,              // null unknown | ["none"] exclusive | snoring | mouth-breathing | restless
@@ -118,8 +121,33 @@ keeps unknown keys, nothing reads them, restore carries them through — so no
 version bump was needed. The CSV exports `changes_recorded` instead: wet
 entries where sheets or pyjamas were changed.
 
-`morning.outcome !== null` *is* the definition of a reviewed night — there is no
-separate reviewed flag that could fall out of sync with it.
+**The outcome is derived (19 September 2026).** Nothing asks for it and nothing
+writes it. A night reads:
+
+| | condition | outcome |
+|---|---|---|
+| 1 | any `wet` event | `wet` |
+| 2 | otherwise, a stored `morning.outcome` | that value |
+| 3 | otherwise, `morning.wakeAt` set | `dry` |
+| 4 | otherwise | unknown — the night is excluded from every rate |
+
+A wet entry is positive evidence and settles the night on its own. With none, a
+stamped `wakeAt` is the parent saying she was there that morning, and that is
+what makes an empty event list mean dry rather than "nobody logged". Rule 2 is
+compatibility only: dropping it would silently un-review every night recorded
+before the change. Rule 1 outranks it, so a stored `dry` can never hide a wet
+entry.
+
+This is a real trade against the rule above that `null` means nobody answered: a
+morning where the wet bed is missed but `wakeAt` is tapped now reads as a
+confirmed dry night rather than an honest gap, and the wet-nights/week rate
+tilts optimistic by exactly those nights. The compensation is that the wet bed
+now has to be logged as an *event*, which the timing and wettings-per-night
+metrics need anyway and which the outcome flag never carried.
+
+A night with a knowable outcome *is* the definition of a reviewed night — there
+is no separate reviewed flag that could fall out of sync with it, and because
+nothing is stored, an entry arriving under a night simply changes what it says.
 
 `noDrinks` and `eventsComplete` exist because several §5 comparisons need a night
 to be positively eligible. An empty `drinks` array cannot be read as "she drank
@@ -186,7 +214,7 @@ night event: the first tap saves, detail is optional enrichment below.
 |---|---|---|
 | Evening | no `asleepAt` | Dinner · Drink · Last toilet · Lights out, then **Fell asleep** (wide) |
 | Night | `asleepAt` set, no `wakeAt` | the five night actions below, then **She's up** (wide) |
-| Day | `wakeAt` set | **Dry night / Wet night**, She's up (time + mood, sleep signs, note), Stool chips, Daytime accidents stepper |
+| Day | `wakeAt` set | **She's up** (time + mood, sleep signs, note), Stool chips, Daytime accidents stepper |
 
 Each step stamps *now* into the field the cards used to ask for (`evening.dinnerAt`,
 `morning.wakeAt`, a row in `evening.drinks` …), so the stored record did not change
@@ -200,9 +228,16 @@ the step that would have brought the screen into the current phase is offered ag
 compact, while its stamp is missing. Stool and accidents also sit under the evening
 grid, labelled as today, so a 17:00 stool lands on last night's day.
 
-Undo reverses the last tap whatever it wrote — an event, a drink row, a stamp, an
-outcome, a stool answer — through one rule in `model.js`. With nothing tapped this
-visit it falls back to removing the night's latest event, as before.
+There is no Dry night / Wet night pair: the outcome is read off the record, so
+the day phase collects only what nothing else can tell it. She's up leads the
+grid at full width, because with no wet entry it is the whole difference
+between a dry night and an unrecorded one. A wet bed discovered in the morning
+is logged through *Log a night event that was missed*, which files a real `wet`
+event with its amount and what was changed.
+
+Undo reverses the last tap whatever it wrote — an event, a drink row, a stamp, a
+stool answer — through one rule in `model.js`. With nothing tapped this visit it
+falls back to removing the night's latest event, as before.
 
 The night grid is unchanged (thumb zone, 2×3):
 
@@ -249,21 +284,22 @@ logged on the grid. Each is a single scrolling card of chip rows and native time
 fields. Every field is skippable. A suggested time — now, or last night's value — is a
 placeholder until it is explicitly accepted; a displayed suggestion is never a stored fact.
 
-The **morning card leads with two equal-weight buttons, Dry night and Wet night**. One tap
-records the outcome, completes the review, and nothing else — every other field stays
-unknown rather than being guessed. Logging a dry night must be no more expensive than
-logging a wet one, or the dataset skews toward the dramatic nights and every rate we
-compute is wrong; it must also carry no more celebration, because this is not something a
-four-year-old controls.
+The **morning card leads with Woke at**, and records no outcome: with no wet entry the
+wake time is the whole difference between a dry night and one nobody was there for. A
+line above it states what the record already says, so the card never reads as if it were
+still asking. Logging a dry night must be no more expensive than logging a wet one, or
+the dataset skews toward the dramatic nights and every rate we compute is wrong; it must
+also carry no more celebration, because this is not something a four-year-old controls.
 
-Tapping Dry on a night that already holds a `wet` event refuses and names the conflict.
-An outcome never deletes an event.
+Because nothing is stored, a Dry outcome can no longer contradict a `wet` event, and the
+conflict flow that refused it is gone with the buttons.
 
 ### 4.3 History
 
 - A scrollable list of nights, one row each: date, a dry/wet dot, time of first wetting,
   event icons. Tap any row to open and edit it — correcting yesterday at breakfast is a
-  first-class flow, not an afterthought.
+  first-class flow, not an afterthought. A night whose outcome is not knowable reads
+  "No wake time"; a calendar gap reads "No record", never Dry.
 - Below it, the metrics (§5).
 - Export button.
 
@@ -294,7 +330,7 @@ stricter than this table and is what gets built.
 
 | Metric | Definition | Answers |
 |---|---|---|
-| **Wet nights / week** | rolling 7-day and 28-day rate of nights with ≥1 `wet` | Diaper or no diaper |
+| **Wet nights / week** | rolling 7-day and 28-day rate of nights with ≥1 `wet`, over nights with a knowable outcome | Diaper or no diaper |
 | **Time to first wetting** | `first wet.t − evening.asleepAt`, in hours, plotted per night | Early+soaked vs late+damp point at different causes |
 | **Wettings per night** | count of `wet` events on wet nights | >1 per night suggests bladder overactivity |
 | **Arousal rate** | `wet` with `noticed:"self"` ÷ all `wet`, 28-day | Is she starting to wake up for it — the slowest and most meaningful trend |

@@ -9,7 +9,7 @@ import {
   activeNightFor, addDrink, dayDateFor, dayLabelFor, dayOwnerId, ensureNight,
   findDrink, findEvent, findNight, insertEvent, isReviewed, latestEvent,
   moveEventTo, newDrink, newEvent, nightForEvent, nightIdFor, nightIdForIso,
-  openNight, outcomeConflict, pendingReviewFor, phaseFor, setNoDrinks,
+  nightStatus, openNight, pendingReviewFor, phaseFor, setNoDrinks,
   stampLabelFor, timeLabelFor, toIso, toggleSleepSign, undoAction,
   weekdayNameFor,
 } from './model.js';
@@ -89,8 +89,6 @@ const state = {
   moveNote: '',
   failure: null,       // { label, retry } — the tap that did not save
   undoError: '',
-  reviewTouched: null, // night whose completed review may now be out of date
-  conflict: null,      // the wet event a Dry tap was refused against
   suppress: false,     // a write that must not rebuild the panel; see quietWrite
 };
 
@@ -107,7 +105,6 @@ function reset() {
   state.moveNote = '';
   state.failure = null;
   state.undoError = '';
-  state.conflict = null;
 }
 
 function openPanel(open) {
@@ -160,7 +157,6 @@ function logEvent(ctx, type, draw, { at, onLogged } = {}) {
   // a device clock that once ran fast cannot pull tonight into a future night.
   const tonightId = nightIdFor(now);
   const id = nightIdForIso(t) ?? tonightId;
-  const reviewed = isReviewed(findNight(ctx.store.get(), id));
   let created = null;
 
   const result = ctx.store.update(draft => {
@@ -180,9 +176,6 @@ function logEvent(ctx, type, draw, { at, onLogged } = {}) {
   state.undoError = '';
   visit.last = { kind: 'event', id: created, nightId: id, label: EVENT_TYPES[type].label, at: t };
   openPanel({ kind: 'event', id: created });
-  // Handoff T03: an extra event after the review is visible, never a silent
-  // change to an outcome someone already recorded.
-  if (reviewed) state.reviewTouched = id;
   if (onLogged) onLogged(created);
   else draw();
 }
@@ -207,7 +200,6 @@ function stamp(ctx, step, draw, at = null) {
   }
   state.failure = null;
   state.undoError = '';
-  state.conflict = null;
   visit.last = { kind: 'field', nightId: id, block: def.block, key: def.key, prev, value: t, label: def.label, step, at: t };
   // The record now says which phase this is; a pill choice would only argue.
   if (def.transition) visit.phase = null;
@@ -246,8 +238,8 @@ function logDrink(ctx, draw, at = null) {
   draw();
 }
 
-// The day rows — outcome, stool, accidents — write one value each and go
-// straight onto the Undo strip; they have no panel of their own.
+// The day rows — stool, accidents — write one value each and go straight
+// onto the Undo strip; they have no panel of their own.
 function writeReview(ctx, { block, key, value, label, text }, draw) {
   const { reviewId } = targets(ctx);
   let prev = null;
@@ -264,23 +256,6 @@ function writeReview(ctx, { block, key, value, label, text }, draw) {
   state.undoError = '';
   visit.last = { kind: 'field', nightId: reviewId, block, key, prev, value, label, text };
   draw();
-}
-
-// Tapping the outcome already recorded does nothing — it is never cleared to
-// unknown from here, only changed by an explicit alternative tap. Dry can
-// never erase a recorded wet entry (DESIGN.md §4.2).
-function tapOutcome(ctx, outcome, draw) {
-  const { review } = targets(ctx);
-  if ((review?.morning?.outcome ?? null) === outcome) return;
-  if (outcome === 'dry') {
-    const conflict = outcomeConflict(review, 'dry');
-    if (conflict) { state.conflict = conflict; draw(); return; }
-  }
-  state.conflict = null;
-  writeReview(ctx, {
-    block: 'morning', key: 'outcome', value: outcome,
-    label: outcome === 'dry' ? 'Dry night' : 'Wet night',
-  }, draw);
 }
 
 // A panel's chips: they enrich the entry Undo already covers, so they only
@@ -326,7 +301,6 @@ function writeEventField(ctx, event, key, value) {
 function moveEvent(ctx, event, t, draw) {
   const to = nightIdForIso(t);
   const moved = to !== nightIdForIso(event.t);
-  const reviewed = isReviewed(findNight(ctx.store.get(), to));
   // Where a moved entry lands, and what becomes of the night it left, is one
   // rule in model.js — History's edit draft moves events too (H04).
   const result = ctx.store.update(draft => { moveEventTo(draft, event.id, t); });
@@ -339,9 +313,6 @@ function moveEvent(ctx, event, t, draw) {
   state.editingTime = false;
   state.panelNote = moved ? '' : 'Saved';
   state.moveNote = moved ? `Moved to the night of ${dayLabelFor(to)}.` : '';
-  // Same rule as a new tap: an outcome someone already recorded is never
-  // silently changed by an entry arriving under it.
-  if (moved && reviewed) state.reviewTouched = to;
   draw();
 }
 
@@ -423,7 +394,6 @@ function tonight(ctx, draw) {
     stale && stale === reviewId && phase !== 'day' ? staleSwitch(stale, draw) : null,
     h('p', { class: 'context', text: contextLine(t) }),
     grid(ctx, t, draw),
-    state.conflict ? conflictNotice(ctx, draw) : null,
     state.failure ? failureNotice(draw) : null,
     last
       ? savedStrip({
@@ -435,7 +405,6 @@ function tonight(ctx, draw) {
       : savedStrip({ text: 'Nothing logged yet', detail: 'Ready whenever you need it.' }),
     state.undoError ? notice({ kind: 'error', title: state.undoError, text: 'The entry is still recorded. Try Undo again.' }) : null,
     state.moveNote ? notice({ text: state.moveNote }) : null,
-    reviewNoticeHere(doc, state.reviewTouched, reviewId, draw),
     open,
     phase === 'day' && isReviewed(review) ? backupNudge(ctx, draw) : null,
     findNight(doc, recordId)
@@ -468,7 +437,7 @@ function phasePill(phase, draw) {
       type: 'button',
       k: `phase-${p}`,
       'aria-pressed': p === phase ? 'true' : 'false',
-      'on:click': () => { visit.phase = p; state.conflict = null; draw(); },
+      'on:click': () => { visit.phase = p; draw(); },
     }, PHASE_LABEL[p])));
 }
 
@@ -490,11 +459,11 @@ function contextLine({ phase, night, review }) {
     const asleep = night?.evening?.asleepAt ?? null;
     return `${asleep ? `Asleep at ${timeLabelFor(asleep)}` : 'Sleep time not added'} · ${events}`;
   }
-  const outcome = review?.morning?.outcome ?? null;
+  const status = nightStatus(review);
   const wake = review?.morning?.wakeAt ?? null;
   const rc = review?.events?.length ?? 0;
   return [
-    outcome ? (outcome === 'dry' ? 'Dry night' : 'Wet night') : 'Outcome not recorded',
+    status === 'dry' ? 'Dry night' : status === 'wet' ? 'Wet night' : 'Nobody has been up yet',
     wake ? `up at ${timeLabelFor(wake)}` : 'wake time not added',
     rc ? `${rc} event${rc > 1 ? 's' : ''}` : 'no events',
   ].join(' · ');
@@ -518,36 +487,9 @@ function staleSwitch(nightId, draw) {
   });
 }
 
-// An entry landed under a night whose review is already recorded — by a tap, a
-// move, an edit or a delete. A night other than the one on screen is named, or
-// the warning reads as if it were about tonight. Exported because History's
-// event editing (H04) changes the same nights and owes the same warning.
-export function reviewNotice(doc, id, shownId) {
-  const night = id ? findNight(doc, id) : null;
-  if (!night || !isReviewed(night)) return null;
-  return notice({
-    kind: 'warm',
-    title: 'Morning review may need updating',
-    text: id === shownId
-      ? 'This night already has an outcome recorded.'
-      : `The night of ${dayLabelFor(id)} already has an outcome recorded.`,
-    children: [linkRow({ label: `Review ${weekdayNameFor(id)} again`, href: `#/morning/${id}`, k: 'rereview' })],
-  });
-}
-
-// Tonight's own copy: when the touched night is the one the day phase
-// reviews, the link switches phase instead of leaving the screen.
-function reviewNoticeHere(doc, id, reviewId, draw) {
-  const night = id ? findNight(doc, id) : null;
-  if (!night || !isReviewed(night)) return null;
-  if (id !== reviewId) return reviewNotice(doc, id, reviewId);
-  return notice({
-    kind: 'warm',
-    title: 'Morning review may need updating',
-    text: 'This night already has an outcome recorded.',
-    children: [linkRow({ label: `Review ${weekdayNameFor(id)} again`, k: 'rereview', onClick: () => { visit.phase = 'day'; draw(); } })],
-  });
-}
+/* A recorded review used to go stale when an entry landed under it, and every
+   screen that could move one owed a warning. Nothing stores the outcome now,
+   so a wet entry arriving on a night that read dry simply makes it wet. */
 
 function failureNotice(draw) {
   const { label, retry } = state.failure;
@@ -556,24 +498,6 @@ function failureNotice(draw) {
     title: `Not saved · ${label}`,
     text: NOT_SAVED,
     children: [button({ label: 'Retry saving', k: 'retry', onClick: retry })],
-  });
-}
-
-// Dry can never erase the mistaken record — only review or an explicit Wet
-// tap moves the outcome past this point. Review opens the entry right here.
-function conflictNotice(ctx, draw) {
-  const event = state.conflict;
-  return notice({
-    kind: 'warm',
-    title: 'This night includes a wet-bed entry.',
-    text: 'Review the entry before marking the night dry.',
-    children: [
-      linkRow({ label: 'Review entries', k: 'review-entries', onClick: () => { openPanel({ kind: 'event', id: event.id }); draw(); } }),
-      button({
-        label: 'Keep wet night', k: 'keep-wet',
-        onClick: () => { state.conflict = null; writeReview(ctx, { block: 'morning', key: 'outcome', value: 'wet', label: 'Wet night' }, draw); },
-      }),
-    ],
   });
 }
 
@@ -598,11 +522,13 @@ function grid(ctx, t, draw) {
       stepAction(ctx, 'wake', review, draw, 'transition'),
       (night?.evening?.asleepAt ?? null) === null ? stepAction(ctx, 'asleep', night, draw, 'compact') : null);
   }
+  // No Dry / Wet pair: the outcome is read off the record (nightStatus).
+  // She's up is what the day phase still has to collect — with no wet entry
+  // it is the whole difference between a dry night and an unrecorded one, so
+  // it leads the grid at full width rather than sitting in a corner.
   return [
     h('div', { class: 'grid' },
-      outcomeButton(ctx, review, 'dry', 'Dry night', 'dry', draw),
-      outcomeButton(ctx, review, 'wet', 'Wet night', 'drop', draw),
-      stepAction(ctx, 'wake', review, draw, (review?.morning?.wakeAt ?? null) === null ? 'compact' : 'transition stamped'),
+      stepAction(ctx, 'wake', review, draw, 'transition'),
       dayRows(ctx, review, draw, false)),
     linkRow({
       label: 'Log a night event that was missed',
@@ -648,17 +574,6 @@ function stepAction(ctx, step, owner, draw, extra = '') {
   },
   icon(def.icon),
   h('span', { text: def.label }, h('small', { text: hint })));
-}
-
-function outcomeButton(ctx, review, value, label, iconName, draw) {
-  const selected = (review?.morning?.outcome ?? null) === value;
-  return h('button', {
-    class: `action${selected ? ' selected' : ''}`,
-    type: 'button',
-    k: `outcome-${value}`,
-    'aria-pressed': selected ? 'true' : 'false',
-    'on:click': () => tapOutcome(ctx, value, draw),
-  }, icon(iconName), h('span', { text: label }));
 }
 
 // Stool and daytime accidents are answers, not instants, so they are chip
@@ -848,10 +763,9 @@ function eventScreen(ctx, draw) {
   }
   return [
     title({ overline: stampLabelFor(event.t), name: EVENT_TYPES[event.type].label }),
-    // The time can be edited here too, so the move and re-review notices
-    // belong here as well — the same feedback Tonight gives.
+    // The time can be edited here too, so the move notice belongs here as
+    // well — the same feedback Tonight gives.
     state.moveNote ? notice({ text: state.moveNote }) : null,
-    reviewNotice(doc, state.reviewTouched, night?.id ?? null),
     detail(ctx, event, draw, {
       onDone: () => ctx.back(),
       heading: false,

@@ -286,13 +286,6 @@ export const EVENING_FIELDS = {
 };
 
 export const MORNING_FIELDS = {
-  outcome: {
-    key: 'outcome', label: 'Outcome', kind: 'single',
-    options: [
-      { value: 'dry', label: 'Dry night' },
-      { value: 'wet', label: 'Wet night' },
-    ],
-  },
   mood: {
     key: 'mood', label: 'Mood', kind: 'single',
     options: [
@@ -365,6 +358,10 @@ export function newNight(id) {
     },
     events: [],
     morning: {
+      // Nothing writes this any more — nightStatus derives the outcome. It
+      // stays in a fresh night so isUntouchedNight still compares against it,
+      // and a night reviewed by tapping Dry before the change is not read as
+      // empty and offered for deletion.
       outcome: null,
       wakeAt: null,
       mood: null,
@@ -559,18 +556,8 @@ export function isUntouchedNight(night) {
   });
 }
 
-// morning.outcome !== null *is* reviewed — there is no separate flag to fall
-// out of sync with it.
-export const isReviewed = night => (night?.morning?.outcome ?? null) !== null;
-
-// Whether setting `outcome` on this night would silently override a wet event
-// already recorded. Only Dry can conflict; Wet never contradicts an event.
-// Returns the first conflicting wet event (in time order) so the screen can
-// link straight to it, or null when the outcome is safe to write.
-export function outcomeConflict(night, outcome) {
-  if (outcome !== 'dry' || !night) return null;
-  return night.events.find(e => e.type === 'wet') ?? null;
-}
+// A night is reviewed once its outcome is knowable — nightStatus says when.
+export const isReviewed = night => nightStatus(night) !== 'review-due';
 
 // Which night tonight's taps belong to, plus the older night still waiting for
 // a review. A stale active night must never absorb the new evening's events.
@@ -688,13 +675,27 @@ export function undoAction(draft, action) {
    the calendar gaps, a deleted night coming back — are asserted on the
    Check tab rather than by clicking. */
 
-// The four states a row may be in. A wet event on an unreviewed night is
-// "wet recorded, review due" — it is not a confirmed wet outcome, and the
-// metrics denominators (UX-HANDOFF P01) depend on telling those apart.
+// The outcome is read off the record, never tapped (DESIGN.md §4.1). A wet
+// entry is positive evidence and decides the night on its own. With none, a
+// stamped wakeAt is the parent saying she was there that morning — that is
+// what makes an empty event list mean dry rather than "nobody logged".
+//
+// Documents written before the outcome became derived still carry
+// morning.outcome, and it still answers for those nights: dropping the read
+// would silently un-review every night recorded before this change. A wet
+// entry outranks it either way, so a stored `dry` can never hide one.
 export function nightStatus(night) {
-  const outcome = night?.morning?.outcome ?? null;
-  if (outcome === 'dry' || outcome === 'wet') return outcome;
-  return (night?.events ?? []).some(e => e.type === 'wet') ? 'wet-review-due' : 'review-due';
+  if ((night?.events ?? []).some(e => e?.type === 'wet')) return 'wet';
+  const recorded = night?.morning?.outcome ?? null;
+  if (recorded === 'dry' || recorded === 'wet') return recorded;
+  return (night?.morning?.wakeAt ?? null) !== null ? 'dry' : 'review-due';
+}
+
+// The same answer as a value rather than a state: dry, wet, or null when
+// nobody has been there yet. Every §5 denominator asks it this way.
+export function outcomeOf(night) {
+  const status = nightStatus(night);
+  return status === 'review-due' ? null : status;
 }
 
 // The first wet entry's instant, or null. Events are kept in `t` order, so
@@ -976,7 +977,7 @@ export function csvRows(doc, fromId, toId) {
       night.events?.length ?? 0, counts.selfToilet, counts.lift, counts.drink,
       counts.wake, counts.wet,
       firstWetTime(night), hoursAfterAsleep(night), changesRecorded(night),
-      morning.outcome ?? null, morning.wakeAt ?? null,
+      outcomeOf(night), morning.wakeAt ?? null,
       morning.mood ?? null, list(morning.sleepSigns), morning.eventsComplete ?? null,
       morning.note || null,
       dayDateFor(night.id), day.accidents ?? null, day.stool ?? null,
